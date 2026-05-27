@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import {
   ShoppingCart, Receipt, BarChart3, Settings as SettingsIcon, Wifi, WifiOff,
   LogOut, Moon, Sun, Menu as MenuIcon, Utensils, Users, Store, CreditCard,
-  LifeBuoy, Archive, Monitor,
+  LifeBuoy, Archive, Monitor, Activity,
 } from 'lucide-react';
 import { C, applyTheme, getInitialTheme } from './theme';
 import { SHOP } from './config';
@@ -16,6 +16,7 @@ import { PinLockScreen } from './components/Shared';
 import { OrderView } from './views/OrderView';
 import { HistoryView } from './views/HistoryView';
 import { ReportsView } from './views/ReportsView';
+import { OperationsView } from './views/OperationsView';
 import { SettingsView } from './views/SettingsView';
 
 // =====================================================================
@@ -93,6 +94,7 @@ export default function App() {
 
         <div style={contentStyle}>
           {view === 'sell' && <OrderView menu={menu} categories={categories} staff={staff} />}
+          {view === 'operations' && <OperationsView staff={staff} />}
           {view === 'orders' && <HistoryView />}
           {view === 'reports' && <ReportsView />}
           {view === 'settings' && (
@@ -129,6 +131,7 @@ function TopBar({ view, openView, theme, toggleTheme, staff, onLogout }) {
 
   const menuItems = [
     { id: 'sell', label: 'Sell / Order Entry', desc: 'Create tickets and take payment', icon: ShoppingCart, view: 'sell' },
+    { id: 'operations', label: 'Operations', desc: 'Queue, closeout, refunds, devices', icon: Activity, view: 'operations' },
     { id: 'orders', label: 'Order History', desc: 'Look up completed receipts', icon: Receipt, view: 'orders' },
     { id: 'reports', label: 'Reports', desc: 'Sales, tender mix, staff totals', icon: BarChart3, view: 'reports' },
     { id: 'menu', label: 'Menu Items', desc: 'Items, categories, pricing', icon: Utensils, view: 'settings', tab: 'menu' },
@@ -140,7 +143,7 @@ function TopBar({ view, openView, theme, toggleTheme, staff, onLogout }) {
     { id: 'settings', label: 'System Settings', desc: 'Version and diagnostics', icon: SettingsIcon, view: 'settings', tab: 'about' },
     { id: 'support', label: 'Daily Ops', desc: 'Use reports and order history for closeout', icon: LifeBuoy, view: 'reports' },
   ];
-  const viewLabels = { sell: 'Sell', orders: 'Orders', reports: 'Reports', settings: 'Settings' };
+  const viewLabels = { sell: 'Sell', operations: 'Ops', orders: 'Orders', reports: 'Reports', settings: 'Settings' };
 
   const chooseMenuItem = (item) => {
     setMainMenuOpen(false);

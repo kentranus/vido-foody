@@ -48,6 +48,30 @@ export async function deleteOrder(id) {
   await setJSON(KEY, all.filter(o => o.id !== id));
 }
 
+export async function updateOrderRecord(id, updates) {
+  const all = await loadAllOrders();
+  const next = all.map(o => o.id === id ? { ...o, ...updates, updatedAt: new Date().toISOString() } : o);
+  await setJSON(KEY, next);
+  return next.find(o => o.id === id) || null;
+}
+
+export async function markOrderVoided(id, reason = '') {
+  return updateOrderRecord(id, {
+    status: 'voided',
+    voidedAt: new Date().toISOString(),
+    voidReason: reason,
+  });
+}
+
+export async function markOrderRefunded(id, amount, reason = '') {
+  return updateOrderRecord(id, {
+    refundAmount: Math.max(0, parseFloat(amount) || 0),
+    refundedAt: new Date().toISOString(),
+    refundReason: reason,
+    status: 'refunded',
+  });
+}
+
 // ============================================================================
 // DATE RANGES (helpers for Reports filter)
 // ============================================================================

@@ -120,17 +120,29 @@ export function ReportsView() {
       {orders.length > 0 && (
         <>
           <div style={s.statsRow}>
-            <StatCard icon={DollarSign} label="Total Sales" value={formatUSD(stats.totalSales)} color={C.primary} />
+            <StatCard icon={DollarSign} label="Net Sales" value={formatUSD(stats.totalSales)} color={C.primary} />
             <StatCard icon={Award} label="Total Tips" value={formatUSD(stats.totalTips)} color={C.yellow} />
             <StatCard icon={ShoppingBag} label="Orders" value={stats.totalOrders} color={C.cyan} />
             <StatCard icon={TrendingUp} label="Avg Order" value={formatUSD(stats.avgOrder)} color={C.blue} />
           </div>
 
           <div style={s.taxBox}>
-            <span style={{ fontSize: 13, fontWeight: 800, color: C.textMute, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-              Tax Collected ({(SHOP.tax * 100).toFixed(2)}%)
-            </span>
-            <div style={{ fontSize: 22, fontWeight: 900, color: C.text }}>{formatUSD(stats.totalTax)}</div>
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 800, color: C.textMute, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Tax Collected ({(SHOP.tax * 100).toFixed(2)}%)
+              </span>
+              <div style={{ fontSize: 22, fontWeight: 900, color: C.text }}>{formatUSD(stats.totalTax)}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 18, textAlign: 'right' }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 900, color: C.textMute }}>GROSS</div>
+                <div style={{ fontSize: 17, fontWeight: 900, color: C.text }}>{formatUSD(stats.grossSales)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 900, color: C.textMute }}>REFUNDS / VOIDS</div>
+                <div style={{ fontSize: 17, fontWeight: 900, color: C.red }}>-{formatUSD(stats.refunds)}</div>
+              </div>
+            </div>
           </div>
 
           <div style={s.chartRow}>
@@ -174,24 +186,27 @@ export function ReportsView() {
 // CALCULATIONS
 // ============================================================================
 function calcStats(orders) {
-  let totalSales = 0, totalTips = 0, totalTax = 0;
+  let totalSales = 0, grossSales = 0, refunds = 0, totalTips = 0, totalTax = 0, activeOrders = 0;
   for (const o of orders) {
-    const sub = (o.items || []).reduce((s, l) => s + (l.basePrice * l.qty) + (l.size === 'L' ? SHOP.sizeLargeBonus * l.qty : 0) + (l.toppings || []).reduce((tt, t) => tt + t.price, 0) * l.qty, 0);
-    const tax = o.taxAmount || (sub * SHOP.tax);
-    const tip = o.tip || 0;
-    totalTax += tax;
-    totalTips += tip;
-    totalSales += sub - (o.discount || 0) + tax + tip;
+    const f = orderFinancials(o);
+    grossSales += f.gross;
+    refunds += f.refund;
+    if (o.status !== 'voided') {
+      activeOrders += 1;
+      totalTax += f.tax;
+      totalTips += f.tip;
+      totalSales += f.net;
+    }
   }
-  return { totalSales, totalTips, totalTax, totalOrders: orders.length, avgOrder: orders.length ? totalSales / orders.length : 0 };
+  return { totalSales, grossSales, refunds, totalTips, totalTax, totalOrders: activeOrders, avgOrder: activeOrders ? totalSales / activeOrders : 0 };
 }
 
 function calcHourly(orders) {
   const hours = new Array(24).fill(0);
   for (const o of orders) {
+    if (o.status === 'voided') continue;
     const h = new Date(o.completedAt).getHours();
-    const sub = (o.items || []).reduce((s, l) => s + (l.basePrice * l.qty), 0);
-    hours[h] += sub + (o.taxAmount || 0) + (o.tip || 0);
+    hours[h] += orderFinancials(o).net;
   }
   return hours;
 }
@@ -199,11 +214,12 @@ function calcHourly(orders) {
 function calcTopItems(orders) {
   const counts = {};
   for (const o of orders) {
+    if (o.status === 'voided') continue;
     for (const l of (o.items || [])) {
       const k = l.name;
       if (!counts[k]) counts[k] = { name: l.name, qty: 0, revenue: 0, emoji: l.emoji };
       counts[k].qty += l.qty;
-      counts[k].revenue += l.basePrice * l.qty;
+      counts[k].revenue += lineTotal(l);
     }
   }
   return Object.values(counts).sort((a, b) => b.qty - a.qty).slice(0, 10);
@@ -212,8 +228,8 @@ function calcTopItems(orders) {
 function calcPayments(orders) {
   const m = { card: 0, cash: 0, giftcard: 0 };
   for (const o of orders) {
-    const sub = (o.items || []).reduce((s, l) => s + (l.basePrice * l.qty), 0);
-    const total = sub + (o.taxAmount || 0) + (o.tip || 0);
+    if (o.status === 'voided') continue;
+    const total = orderFinancials(o).net;
     const rawKey = o.paymentMethod || 'card';
     const key = rawKey === 'wallet' ? 'giftcard' : rawKey;
     m[key] = (m[key] || 0) + total;
@@ -224,12 +240,29 @@ function calcPayments(orders) {
 function calcCategories(orders) {
   const c = {};
   for (const o of orders) {
+    if (o.status === 'voided') continue;
     for (const l of (o.items || [])) {
       const cat = l.category || 'other';
-      c[cat] = (c[cat] || 0) + l.basePrice * l.qty;
+      c[cat] = (c[cat] || 0) + lineTotal(l);
     }
   }
   return c;
+}
+
+function lineTotal(line) {
+  const large = line.size === 'L' ? SHOP.sizeLargeBonus : 0;
+  const toppings = (line.toppings || []).reduce((s, t) => s + (t.price || 0), 0);
+  return ((line.basePrice || 0) + large + toppings) * (line.qty || 1);
+}
+
+function orderFinancials(order) {
+  const sub = (order.items || []).reduce((s, l) => s + lineTotal(l), 0);
+  const tax = order.taxAmount || Math.max(0, sub - (order.discount || 0)) * SHOP.tax;
+  const tip = order.tip || 0;
+  const gross = Math.max(0, sub - (order.discount || 0) + tax + tip);
+  const refund = order.status === 'voided' ? gross : Math.min(gross, order.refundAmount || 0);
+  const net = Math.max(0, gross - refund);
+  return { sub, tax, tip, gross, refund, net };
 }
 
 // ============================================================================
@@ -359,20 +392,19 @@ function OrderList({ orders }) {
   return (
     <div style={{ maxHeight: 280, overflowY: 'auto' }}>
       {orders.slice().reverse().map(o => {
-        const sub = (o.items || []).reduce((s, l) => s + (l.basePrice * l.qty), 0);
-        const total = sub - (o.discount || 0) + (o.taxAmount || 0) + (o.tip || 0);
+        const f = orderFinancials(o);
         return (
           <div key={o.id || o.number} style={s.orderRow}>
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 800, color: C.text, fontSize: 13 }}>
-                Order #{o.number} <span style={{ color: C.textMute, fontWeight: 600, fontSize: 11 }}>· {o.type}</span>
+                Order #{o.number} <span style={{ color: C.textMute, fontWeight: 600, fontSize: 11 }}>· {o.type}{o.status === 'voided' ? ' · VOID' : o.refundAmount > 0 ? ' · REFUND' : ''}</span>
               </div>
               <div style={{ fontSize: 11, color: C.textMute, marginTop: 2, fontWeight: 700 }}>
                 {formatDateTime(o.completedAt)} · {(o.items || []).length} items
                 {o.staffName && ` · ${o.staffName}`}
               </div>
             </div>
-            <div style={{ fontWeight: 900, color: C.primary, fontSize: 14 }}>{formatUSD(total)}</div>
+            <div style={{ fontWeight: 900, color: o.status === 'voided' ? C.red : C.primary, fontSize: 14 }}>{formatUSD(f.net)}</div>
           </div>
         );
       })}
