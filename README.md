@@ -1,192 +1,106 @@
-# Vido Foody
+# Vido Foody POS - Flutter + Node.js Handoff
 
-**Modern restaurant POS for boba/coffee/fast food shops.**
-Yellow-orange Foody branding · Dark mode default · Web + Android APK from one codebase.
+This is the final handoff package for the dev team.
 
-## Features
+Important: the React/Capacitor prototype is intentionally not included as the production app. The app direction is Flutter for the tablet POS and Node.js for backend/API work.
 
-### Selling
-- 🛒 Multi-order tabs (handle 3+ orders simultaneously)
-- 🍔 Customize items: size, sugar %, ice %, toppings
-- 🏠 Order types: Dine In / To Go / Delivery
-- 🏷️ Discount ($ or %, manager PIN required)
-- 📝 Order notes
-- 🔍 Search menu items
+## Folders
 
-### Payments
-- 💵 **Cash** with quick amounts + change calculator
-- 💳 **Card Payment** (BroadPOS TCP, port 10009)
-- 🎁 **Gift Card** (mark as paid)
-- ✨ Customer chooses tip on the card terminal
+- `vido-foody-flutter/` - Flutter tablet POS app. This is the app your Flutter team should continue.
+- `vido-foody-backend/` - Node.js backend/API starter.
+- `docs/` - PAX/POSLink integration and migration notes.
+- `.github/workflows/` - GitHub Actions checks for Flutter and Node.js.
 
-### Reports
-- 📅 Date range filter (Today / Week / Month / Custom)
-- 💰 Stats: Sales, Tips, Orders, AOV, Tax
-- 📊 Hourly sales chart
-- 🥧 Payment method donut
-- 🏆 Top sellers
-- 📤 **Export CSV** for accounting
+## Current Status
 
-### Menu Management
-- Add/Edit/Delete items + categories
-- Mark items "Sold Out" temporarily
-- Image URL or emoji+gradient
-- Reset to defaults
+This package is a Flutter + Node.js product-pilot handoff, not a completed Toast/Square/Clover-level production POS.
 
-### Staff & Security
-- 🔐 PIN-based login (4-digit)
-- 👤 Roles: Manager / Cashier
-- 🔒 Manager-only: discounts, payment settings, Staff management
-- Default: Manager `1234` / Cashier `0000`
+Implemented in the Flutter starting point:
 
-### System
-- 🌑 Dark mode default + ☀️ Light mode toggle
-- 💾 Persistent storage (orders, menu, settings)
-- 📊 Order history with search
-- 🌐 **Web preview** for debugging (open DevTools F12)
-- ℹ️ About page with version + build info
+- Sell screen with Vido Foody branding.
+- 4-column menu grid.
+- Large category and Add controls.
+- Light and dark mode.
+- Cash, Card Payment, and Gift Card labels.
+- Payment settings screen for TCP/IP and USB direction.
+- Operations, online orders, history, reports, and settings screens.
+- Node backend integration path.
 
-## Brand
+Still required for production:
 
-- **Primary**: `#F59E0B` (Foody yellow)
-- **Accent**: `#FBBF24` (lighter yellow)
-- **Logo**: White **F** on yellow-orange gradient
+- Complete 1:1 port of all final prototype behavior into Flutter.
+- Native Android MethodChannel for PAX POSLink Java Android SDK.
+- Real Card Payment sale, void, and refund through PAX/POSLink.
+- Receipt printer and cash drawer native MethodChannel.
+- Customer display native MethodChannel.
+- Persistent database instead of only in-memory/demo state.
+- Online ordering sync from `https://vidocenter.com/foody/`.
+- Manager approval and audit trail for refund, void, discount, and ticket changes.
+- Full settlement/batch reconciliation.
 
-## Quick Start
+For pilot readiness, see `docs/PRODUCT_PILOT_SCOPE.md`.
 
-### 1. Create GitHub repo
-1. [github.com/new](https://github.com/new)
-2. Name: `vido-foody`
-3. **Public** (required for free GitHub Pages)
-4. Don't add README
-5. Create
+## Run Backend
 
-### 2. Upload code
-Use [GitHub Desktop](https://desktop.github.com) — handles hidden `.github` folder.
-
-1. **File → Add Local Repository** → select `vido-pos-final` folder
-2. **Publish repository**
-
-### 3. Enable GitHub Pages
-1. Repo → **Settings → Pages**
-2. Source: **GitHub Actions**
-3. Save
-
-### 4. Wait for build (~5-10 min)
-Tab **Actions** → workflow runs automatically, 3 jobs in parallel:
-- ✅ Build web bundle
-- ✅ Deploy to GitHub Pages → `https://USERNAME.github.io/vido-foody/`
-- ✅ Build APK → Artifacts
-
-### 5. Use it
-- **Web preview**: open the GitHub Pages URL on any browser → see all errors in DevTools
-- **Tablet APK**: Actions → latest run → download `vido-foody-apk-build-N`
-
-### 6. Payment Terminal Setup
-1. Open Vantiv/BroadPOS on the card terminal → note the IP
-2. Vido Foody → **Settings → Payment Settings** (Manager PIN required)
-3. Enter IP, port `10009`
-4. **Test Connection** → should say Connected
-
-## Default Credentials
-
-| Role     | PIN  |
-|----------|------|
-| Manager  | 1234 |
-| Cashier  | 0000 |
-
-**Change these in Settings → Staff after first sign in.**
-
-## First-time setup for a NEW shop
-
-When installing this app for a new customer/shop:
-
-1. **Install APK** on the tablet
-2. Sign in with Manager PIN (default `1234`)
-3. **Settings → Shop Info** — Configure for this specific shop:
-   - Shop name, branch, address, phone
-   - Tax rate (e.g., 8.75%)
-   - Currency symbol
-   - Tip percentages
-   - Receipt footer
-4. **Settings → Menu Editor** — Customize menu for this shop
-5. **Settings → Staff** — Change default PINs, add staff
-6. **Settings → Payment Settings** — Connect the card terminal by IP
-7. Ready to sell!
-
-All settings are saved on-device. Different tablets = different shops.
-
-## Project Structure
-
-```
-vido-pos-final/
-├── .github/workflows/build.yml      # Builds APK + deploys web
-├── README.md
-└── tablet-app/
-    ├── package.json
-    ├── vite.config.js
-    ├── capacitor.config.ts
-    ├── index.html
-    ├── android-config/network_security_config.xml
-    ├── android-plugin/              # Custom Java TCP plugin
-    └── src/
-        ├── main.jsx
-        ├── App.jsx                  # Main shell + nav
-        ├── theme.js                 # Foody yellow theme
-        ├── config.js                # Shop info
-        ├── version.js               # Build info (auto-injected)
-        ├── components/Shared.jsx    # Modal, PIN, Button, Input
-        ├── data/defaultMenu.js
-        ├── services/
-        │   ├── storage.js
-        │   ├── menuStorage.js
-        │   ├── orderStorage.js
-        │   ├── staffStorage.js
-        │   └── paxBridge.js         # TCP + web simulation
-        └── views/
-            ├── OrderView.jsx        # Selling (main)
-            ├── HistoryView.jsx
-            ├── ReportsView.jsx
-            └── SettingsView.jsx
+```bash
+cd vido-foody-backend
+npm install
+npm start
 ```
 
-## Customization
+Default backend:
 
-### Change shop info
-Edit `tablet-app/src/config.js`:
-```js
-export const SHOP = {
-  name: 'Your Shop',
-  branch: 'Branch',
-  address: '...',
-  tax: 0.0875,  // 8.75%
-};
+```text
+http://localhost:8787
 ```
 
-### Change brand colors
-Edit `tablet-app/src/theme.js` and `tablet-app/index.html` (for splash). Search and replace `#F59E0B` (primary) and `#FBBF24` (accent) with your brand colors.
+For Android tablet testing, use the machine/server LAN IP instead of localhost.
 
-### Change menu
-In-app: **Settings → Menu Editor**. Or edit `tablet-app/src/data/defaultMenu.js`.
+Example:
 
-## Web vs Native
+```text
+http://192.168.68.55:8787
+```
 
-| Feature | Web preview | Tablet APK |
-|---|---|---|
-| Sell, cart, customize | ✅ | ✅ |
-| Cash, Gift Card | ✅ | ✅ |
-| **Card Payment** | 🤖 Simulated | ✅ Real TCP |
-| Reports, History | ✅ | ✅ |
-| Menu Editor | ✅ | ✅ |
-| Storage | localStorage | Capacitor Preferences |
+## Run Flutter
 
-## Built with
+```bash
+cd vido-foody-flutter
+flutter create .
+flutter pub get
+flutter run
+```
 
-- React 18 + Vite 5
-- Capacitor 5 (Android)
-- Lucide React icons
-- Custom Java TCP plugin for BroadPOS
+For local backend testing on Android, enable cleartext HTTP in the generated Android app while developing:
 
-## License
+```xml
+android:usesCleartextTraffic="true"
+```
 
-Built for Vido Foody · Kenny · 2026
+## Payment / PAX Direction
+
+Preferred production path:
+
+```text
+Flutter
+-> Android MethodChannel
+-> PAX POSLink Java Android SDK
+-> PAX/BroadPOS terminal
+```
+
+TCP/IP can go through either native POSLink or backend BroadPOS TCP during development.
+USB payment must be native Android through Flutter MethodChannel; Node.js cannot talk to the Android USB terminal directly.
+
+See:
+
+- `docs/PAX_POSLINK_INTEGRATION.md`
+- `docs/FLUTTER_NODEJS_MIGRATION.md`
+
+## What To Give The Dev Team
+
+Give them this entire zip/folder. Tell them:
+
+1. Flutter is the production app target.
+2. Node.js is the backend target.
+3. Do not continue React/Capacitor as production.
+4. Use the docs to finish PAX, printer, cash drawer, customer display, and online ordering.
