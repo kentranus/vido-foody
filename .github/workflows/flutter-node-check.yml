@@ -1,0 +1,62 @@
+name: Flutter and Node Check
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  node-backend:
+    name: Node Backend Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Install backend dependencies
+        working-directory: vido-foody-backend
+        run: npm install
+
+      - name: Backend syntax check
+        working-directory: vido-foody-backend
+        run: node --check src/server.js
+
+  flutter-app:
+    name: Flutter App Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Create Flutter platform files if needed
+        working-directory: vido-foody-flutter
+        run: flutter create .
+
+      - name: Install Flutter dependencies
+        working-directory: vido-foody-flutter
+        run: flutter pub get
+
+      - name: Analyze Flutter app
+        working-directory: vido-foody-flutter
+        run: flutter analyze
+
+      - name: Build Android APK
+        working-directory: vido-foody-flutter
+        run: flutter build apk --debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v5
+        with:
+          name: vido-foody-flutter-debug-apk
+          path: vido-foody-flutter/build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 30
