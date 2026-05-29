@@ -19,6 +19,7 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
   String? _statusMsg;
   bool _failed = false;
   PaxSaleResult? _result;
+  final _cashReceived = TextEditingController();
 
   @override
   void initState() {
@@ -30,11 +31,22 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
     });
   }
 
+  @override
+  void dispose() {
+    _cashReceived.dispose();
+    super.dispose();
+  }
+
+  double get _receivedCash => double.tryParse(_cashReceived.text.trim()) ?? 0;
+  double get _changeDue => (_receivedCash - widget.cart.total).clamp(0, 999999).toDouble();
+
   Future<void> _confirm() async {
     setState(() { _processing = true; _statusMsg = null; _failed = false; });
 
     if (widget.method == 'card') {
       await _runCardPayment();
+    } else if (widget.method == 'cash') {
+      await _completeCash();
     } else {
       setState(() => _statusMsg = 'Printing customer receipt and kitchen ticket…');
       await Future.delayed(const Duration(milliseconds: 800));
@@ -42,6 +54,29 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
       ref.read(cfdControllerProvider).markCompleted(cart: widget.cart);
       Navigator.of(context).pop(true);
     }
+  }
+
+  Future<void> _completeCash() async {
+    final received = _receivedCash;
+    if (received + 0.001 < widget.cart.total) {
+      setState(() {
+        _processing = false;
+        _failed = true;
+        _statusMsg = 'Amount received is less than total due.';
+      });
+      return;
+    }
+
+    setState(() {
+      _failed = false;
+      _statusMsg = _changeDue > 0
+        ? 'Opening cash drawer for change. Printing receipt + kitchen/drink ticket…'
+        : 'Paid exact cash. Printing receipt + kitchen/drink ticket…';
+    });
+    await Future.delayed(const Duration(milliseconds: 900));
+    if (!mounted) return;
+    ref.read(cfdControllerProvider).markCompleted(cart: widget.cart);
+    Navigator.of(context).pop(true);
   }
 
   Future<void> _runCardPayment() async {
@@ -95,6 +130,8 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.method == 'cash') return _cashPaymentSheet(context);
+
     final methodLabel = {
       'cash': 'Cash', 'card': 'Card Payment', 'giftcard': 'Gift Card',
     }[widget.method] ?? widget.method;
@@ -245,6 +282,145 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
           child: const Text('Cancel',
             style: TextStyle(color: FC.textMute, fontWeight: FontWeight.w800)),
         ),
+      ]),
+    );
+  }
+
+  Widget _cashPaymentSheet(BuildContext context) {
+    final total = widget.cart.total;
+    final rounded = total.ceilToDouble();
+    final quick = <double>{
+      rounded,
+      if (total <= 10) 10,
+      if (total <= 20) 20,
+      if (total <= 50) 50,
+      100,
+    }.where((v) => v >= total).take(4).toList();
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: FC.panel,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        20, 18, 20, MediaQuery.of(context).padding.bottom + 18,
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Center(child: Container(
+          margin: const EdgeInsets.only(bottom: 14),
+          width: 36, height: 4,
+          decoration: BoxDecoration(
+            color: FC.border, borderRadius: BorderRadius.circular(4),
+          ),
+        )),
+        Row(children: const [
+          Icon(Icons.payments, color: FC.primary, size: 28),
+          SizedBox(width: 10),
+          Text('Cash Payment',
+            style: TextStyle(color: FC.text, fontWeight: FontWeight.w900, fontSize: 22)),
+        ]),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: FC.card,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: FC.border),
+          ),
+          child: Row(children: [
+            const Text('Total due',
+              style: TextStyle(color: FC.text, fontWeight: FontWeight.w900, fontSize: 18)),
+            const Spacer(),
+            Text('$kCurrencySymbol${total.toStringAsFixed(2)}',
+              style: const TextStyle(color: FC.primary, fontWeight: FontWeight.w900, fontSize: 34)),
+          ]),
+        ),
+        const SizedBox(height: 12),
+        const Text('AMOUNT RECEIVED',
+          style: TextStyle(color: FC.textMute, fontWeight: FontWeight.w900, fontSize: 12, letterSpacing: 0.8)),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _cashReceived,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          textAlign: TextAlign.right,
+          style: const TextStyle(color: FC.text, fontWeight: FontWeight.w900, fontSize: 28),
+          onChanged: (_) => setState(() {}),
+          decoration: InputDecoration(
+            hintText: '0.00',
+            hintStyle: const TextStyle(color: FC.textMute),
+            prefixText: kCurrencySymbol,
+            prefixStyle: const TextStyle(color: FC.text, fontWeight: FontWeight.w900, fontSize: 22),
+            filled: true,
+            fillColor: FC.bg,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: FC.border)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: FC.border)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: FC.primary, width: 2)),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(spacing: 10, runSpacing: 10, children: [
+          for (final amount in quick)
+            SizedBox(
+              width: 110,
+              height: 46,
+              child: FilledButton(
+                onPressed: _processing ? null : () {
+                  _cashReceived.text = amount.toStringAsFixed(2);
+                  setState(() {});
+                },
+                style: FilledButton.styleFrom(
+                  backgroundColor: FC.card,
+                  foregroundColor: FC.text,
+                  side: const BorderSide(color: FC.border),
+                ),
+                child: Text('$kCurrencySymbol${amount.toStringAsFixed(amount == amount.roundToDouble() ? 0 : 2)}',
+                  style: const TextStyle(fontWeight: FontWeight.w900)),
+              ),
+            ),
+        ]),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: FC.bg, borderRadius: BorderRadius.circular(14), border: Border.all(color: FC.border)),
+          child: Row(children: [
+            const Text('Change due',
+              style: TextStyle(color: FC.textMute, fontWeight: FontWeight.w900, fontSize: 14)),
+            const Spacer(),
+            Text('$kCurrencySymbol${_changeDue.toStringAsFixed(2)}',
+              style: const TextStyle(color: FC.green, fontWeight: FontWeight.w900, fontSize: 24)),
+          ]),
+        ),
+        if (_statusMsg != null) Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Text(_statusMsg!,
+            style: TextStyle(
+              color: _failed ? FC.red : FC.text,
+              fontWeight: FontWeight.w800,
+            )),
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity, height: 52,
+          child: ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: FC.primary,
+              foregroundColor: FC.bg,
+              disabledBackgroundColor: FC.card,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            onPressed: _processing ? null : _confirm,
+            child: _processing
+              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: FC.bg))
+              : const Text('Complete Sale',
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Center(child: TextButton(
+          onPressed: _processing ? null : () => Navigator.of(context).pop(false),
+          child: const Text('Cancel',
+            style: TextStyle(color: FC.textMute, fontWeight: FontWeight.w800)),
+        )),
       ]),
     );
   }

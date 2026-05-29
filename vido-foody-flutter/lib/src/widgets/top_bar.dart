@@ -28,15 +28,9 @@ class TopBar extends ConsumerWidget {
             border: Border(bottom: BorderSide(color: FC.border)),
           ),
           child: Row(children: [
-            Container(
+            SizedBox(
               width: 46,
               height: 46,
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: FC.card,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: FC.border),
-              ),
               child: Image.asset('assets/vido-foody-logo.png', fit: BoxFit.contain),
             ),
             const SizedBox(width: 16),
@@ -69,7 +63,7 @@ class TopBar extends ConsumerWidget {
                   Icon(Icons.monitor,
                     color: cfdEnabled ? FC.primary : FC.textMute, size: 16),
                   const SizedBox(width: 6),
-                  Text(cfdEnabled ? 'CFD ON' : 'CFD',
+                  Text(cfdEnabled ? 'Customer Display ON' : 'Customer Display',
                     style: TextStyle(
                       color: cfdEnabled ? FC.primary : FC.text,
                       fontWeight: FontWeight.w900, fontSize: 11)),

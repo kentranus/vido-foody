@@ -3,7 +3,8 @@ import '../theme.dart';
 
 class Sidebar extends StatelessWidget {
   final ValueChanged<String>? onOpenFeature;
-  const Sidebar({super.key, this.onOpenFeature});
+  final String activeLabel;
+  const Sidebar({super.key, this.onOpenFeature, this.activeLabel = 'Order'});
 
   @override
   Widget build(BuildContext context) {
@@ -15,25 +16,17 @@ class Sidebar extends StatelessWidget {
       ),
       child: Column(children: [
         const SizedBox(height: 16),
-        Container(
-          width: 70, height: 70,
-          decoration: BoxDecoration(
-            color: FC.card,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: FC.border),
-            boxShadow: [
-              BoxShadow(color: FC.primary.withOpacity(0.3),
-                blurRadius: 18, offset: const Offset(0, 6)),
-            ],
+        ClipOval(
+          child: SizedBox(
+            width: 70,
+            height: 70,
+            child: Image.asset('assets/vido-foody-logo.png', fit: BoxFit.contain),
           ),
-          alignment: Alignment.center,
-          padding: const EdgeInsets.all(12),
-          child: Image.asset('assets/vido-foody-logo.png', fit: BoxFit.contain),
         ),
         const SizedBox(height: 8),
         const Text('Krishna',
           style: TextStyle(color: FC.text, fontWeight: FontWeight.w900, fontSize: 13)),
-        const Text("I'm a cashier 👋",
+        const Text("I'm a cashier",
           style: TextStyle(color: FC.textMute, fontWeight: FontWeight.w700, fontSize: 10)),
         const SizedBox(height: 16),
         Expanded(child: Padding(
@@ -44,16 +37,23 @@ class Sidebar extends StatelessWidget {
             crossAxisSpacing: 8,
             childAspectRatio: 1.05,
             children: [
-              const _NavTile(icon: Icons.shopping_bag, label: 'Order', active: true),
+              _NavTile(icon: Icons.shopping_bag, label: 'Order',
+                active: activeLabel == 'Order',
+                onTap: () => onOpenFeature?.call('Order')),
               _NavTile(icon: Icons.receipt_long, label: 'Bills',
+                active: activeLabel == 'Bills',
                 onTap: () => onOpenFeature?.call('Bills')),
               _NavTile(icon: Icons.bar_chart, label: 'Reports',
+                active: activeLabel == 'Reports',
                 onTap: () => onOpenFeature?.call('Reports')),
               _NavTile(icon: Icons.settings, label: 'Setting',
+                active: activeLabel == 'Settings',
                 onTap: () => onOpenFeature?.call('Settings')),
               _NavTile(icon: Icons.public, label: 'Online',
+                active: activeLabel == 'Online Orders',
                 onTap: () => onOpenFeature?.call('Online Orders')),
               _NavTile(icon: Icons.storefront, label: 'Kiosk',
+                active: activeLabel == 'Kiosk',
                 onTap: () => onOpenFeature?.call('Kiosk')),
             ],
           ),
@@ -94,18 +94,19 @@ class _NavTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Ink(
+    return TextButton(
+      onPressed: onTap,
+      style: TextButton.styleFrom(
+        padding: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        backgroundColor: active ? Color.lerp(FC.card, FC.primary, 0.12) : FC.card,
+      ),
+      child: Container(
+        width: double.infinity,
+        height: double.infinity,
         decoration: BoxDecoration(
-          color: active ? FC.primaryA : FC.card,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: active ? FC.primary : FC.border),
-          boxShadow: active ? [
-            BoxShadow(color: FC.primary.withOpacity(0.35),
-              blurRadius: 14, offset: const Offset(0, 4)),
-          ] : null,
+          border: Border.all(color: active ? FC.primary : FC.border, width: active ? 2 : 1),
         ),
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(icon, size: 20, color: active ? FC.primary : FC.text),

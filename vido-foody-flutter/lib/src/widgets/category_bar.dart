@@ -60,32 +60,30 @@ class _Pill extends StatelessWidget {
     final border = active ? FC.primary : FC.border;
     return Padding(
       padding: const EdgeInsets.only(right: 6),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: Ink(
+      child: TextButton(
+        onPressed: onTap,
+        style: TextButton.styleFrom(
+          backgroundColor: bg,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: bg, borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: border),
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Container(
-              width: 24, height: 24,
-              decoration: BoxDecoration(
-                color: active ? Colors.white.withOpacity(0.25) : FC.panel,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Text(icon, style: const TextStyle(fontSize: 13)),
-            ),
-            const SizedBox(width: 8),
-            Text(label, style: TextStyle(
-              color: active ? FC.primary : FC.text,
-              fontWeight: FontWeight.w900, fontSize: 12,
-            )),
-          ]),
+          shape: const StadiumBorder(),
+          side: BorderSide(color: border),
         ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 24, height: 24,
+            decoration: BoxDecoration(
+              color: active ? Colors.white.withOpacity(0.25) : FC.panel,
+              shape: BoxShape.circle,
+            ),
+            alignment: Alignment.center,
+            child: Text(icon, style: const TextStyle(fontSize: 13)),
+          ),
+          const SizedBox(width: 8),
+          Text(label, style: TextStyle(
+            color: active ? FC.primary : FC.text,
+            fontWeight: FontWeight.w900, fontSize: 12,
+          )),
+        ]),
       ),
     );
   }
