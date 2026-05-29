@@ -5,28 +5,23 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
-  node-backend:
+  backend-check:
     name: Node Backend Check
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vido-foody-backend
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
-          node-version: '24'
-          package-manager-cache: false
+          node-version: 24
 
-      - name: Install backend dependencies
-        working-directory: vido-foody-backend
-        run: npm install
+      - run: npm install
 
-      - name: Backend syntax check
-        working-directory: vido-foody-backend
-        run: node --check src/server.js
+      - run: node --check src/server.js
 
   build-pos-apk:
     name: Build POS APK
@@ -40,11 +35,9 @@ jobs:
 
       - name: Create Flutter platform files if needed
         working-directory: vido-foody-flutter
-        run: flutter create .
-
-      - name: Remove generated sample test
-        working-directory: vido-foody-flutter
-        run: rm -f test/widget_test.dart
+        run: |
+          flutter create .
+          rm -f test/widget_test.dart
 
       - name: Install Flutter dependencies
         working-directory: vido-foody-flutter
@@ -56,11 +49,10 @@ jobs:
 
       - name: Build Android POS APK
         working-directory: vido-foody-flutter
-        run: flutter build apk --debug
+        run: flutter build apk --release
 
       - name: Upload POS APK
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
-          name: vido-foody-pos-debug-apk
-          path: vido-foody-flutter/build/app/outputs/flutter-apk/app-debug.apk
-          retention-days: 30
+          name: vido-foody-pos-apk
+          path: vido-foody-flutter/build/app/outputs/flutter-apk/app-release.apk
