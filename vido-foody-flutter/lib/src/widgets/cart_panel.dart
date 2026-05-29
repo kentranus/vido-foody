@@ -84,9 +84,9 @@ class CartPanel extends ConsumerWidget {
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (_, i) => _LineTile(
                   line: cart.lines[i],
-                  onPlus:   () => ref.read(cartProvider.notifier).changeQty(cart.lines[i].product.id,  1),
-                  onMinus:  () => ref.read(cartProvider.notifier).changeQty(cart.lines[i].product.id, -1),
-                  onDelete: () => ref.read(cartProvider.notifier).remove(cart.lines[i].product.id),
+                  onPlus:   () => ref.read(cartProvider.notifier).changeQty(cart.lines[i].key,  1),
+                  onMinus:  () => ref.read(cartProvider.notifier).changeQty(cart.lines[i].key, -1),
+                  onDelete: () => ref.read(cartProvider.notifier).remove(cart.lines[i].key),
                 ),
               ),
         ),
@@ -210,6 +210,10 @@ class _LineTile extends StatelessWidget {
               maxLines: 1, overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: FC.text, fontWeight: FontWeight.w900, fontSize: 12)),
+            Text(line.optionLabel,
+              maxLines: 2, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: FC.textDim, fontWeight: FontWeight.w700, fontSize: 10)),
             Text('${kCurrencySymbol}${line.lineTotal.toStringAsFixed(2)}',
               style: const TextStyle(
                 color: FC.textMute, fontWeight: FontWeight.w800, fontSize: 11)),

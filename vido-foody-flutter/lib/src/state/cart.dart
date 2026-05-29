@@ -6,10 +6,38 @@ import 'catalog.dart';
 class CartLine {
   final Product product;
   final int qty;
-  const CartLine({required this.product, required this.qty});
+  final String size;
+  final String sugar;
+  final List<LineAddon> addons;
+  const CartLine({
+    required this.product,
+    required this.qty,
+    this.size = 'M',
+    this.sugar = '100%',
+    this.addons = const [],
+  });
+  String get key => [
+    product.id,
+    size,
+    sugar,
+    ...addons.map((a) => a.name),
+  ].join('|');
+  String get optionLabel {
+    final extras = addons.isEmpty ? '' : ' · ${addons.map((a) => a.name).join(', ')}';
+    return '$size · Sugar $sugar$extras';
+  }
+  double get addonTotal => addons.fold(0.0, (s, a) => s + a.price);
+  double get unitTotal => product.price + addonTotal;
   CartLine copyWith({int? qty}) =>
-      CartLine(product: product, qty: qty ?? this.qty);
-  double get lineTotal => product.price * qty;
+      CartLine(product: product, qty: qty ?? this.qty, size: size, sugar: sugar, addons: addons);
+  double get lineTotal => unitTotal * qty;
+}
+
+@immutable
+class LineAddon {
+  final String name;
+  final double price;
+  const LineAddon(this.name, this.price);
 }
 
 @immutable
@@ -32,23 +60,24 @@ class Cart {
 class CartNotifier extends StateNotifier<Cart> {
   CartNotifier() : super(const Cart());
 
-  void add(Product p) {
-    final idx = state.lines.indexWhere((l) => l.product.id == p.id);
+  void add(Product p, {String size = 'M', String sugar = '100%', List<LineAddon> addons = const []}) {
+    final line = CartLine(product: p, qty: 1, size: size, sugar: sugar, addons: addons);
+    final idx = state.lines.indexWhere((l) => l.key == line.key);
     if (idx >= 0) {
       final newLines = [...state.lines];
       newLines[idx] = newLines[idx].copyWith(qty: newLines[idx].qty + 1);
       state = state.copyWith(lines: newLines);
     } else {
-      state = state.copyWith(lines: [...state.lines, CartLine(product: p, qty: 1)]);
+      state = state.copyWith(lines: [...state.lines, line]);
     }
   }
 
-  void changeQty(String productId, int delta) {
-    final idx = state.lines.indexWhere((l) => l.product.id == productId);
+  void changeQty(String lineKey, int delta) {
+    final idx = state.lines.indexWhere((l) => l.key == lineKey);
     if (idx < 0) return;
     final next = state.lines[idx].qty + delta;
     if (next <= 0) {
-      remove(productId);
+      remove(lineKey);
     } else {
       final newLines = [...state.lines];
       newLines[idx] = newLines[idx].copyWith(qty: next);
@@ -56,9 +85,9 @@ class CartNotifier extends StateNotifier<Cart> {
     }
   }
 
-  void remove(String productId) {
+  void remove(String lineKey) {
     state = state.copyWith(
-      lines: state.lines.where((l) => l.product.id != productId).toList(),
+      lines: state.lines.where((l) => l.key != lineKey).toList(),
     );
   }
 

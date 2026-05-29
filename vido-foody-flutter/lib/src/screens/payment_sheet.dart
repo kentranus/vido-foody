@@ -36,7 +36,8 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
     if (widget.method == 'card') {
       await _runCardPayment();
     } else {
-      await Future.delayed(const Duration(milliseconds: 600));
+      setState(() => _statusMsg = 'Printing customer receipt and kitchen ticket…');
+      await Future.delayed(const Duration(milliseconds: 800));
       if (!mounted) return;
       ref.read(cfdControllerProvider).markCompleted(cart: widget.cart);
       Navigator.of(context).pop(true);
@@ -69,7 +70,7 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
 
     if (res.ok) {
       ref.read(cfdControllerProvider).markCompleted(cart: cart);
-      setState(() => _statusMsg = 'Payment approved');
+      setState(() => _statusMsg = 'Approved. Printing receipt + kitchen/drink ticket…');
       await Future.delayed(const Duration(milliseconds: 900));
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -95,12 +96,12 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
   @override
   Widget build(BuildContext context) {
     final methodLabel = {
-      'cash': 'Cash', 'card': 'Card', 'ewallet': 'E-Wallet / QR',
+      'cash': 'Cash', 'card': 'Card Payment', 'giftcard': 'Gift Card',
     }[widget.method] ?? widget.method;
     final methodIcon = {
       'cash': Icons.attach_money,
       'card': Icons.credit_card,
-      'ewallet': Icons.qr_code_2,
+      'giftcard': Icons.card_giftcard,
     }[widget.method] ?? Icons.payment;
     final isCard = widget.method == 'card';
 
@@ -160,6 +161,24 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
               style: const TextStyle(color: FC.text, fontWeight: FontWeight.w900, fontSize: 14)),
             const Spacer(),
             if (isCard) _PaxBadge(),
+          ]),
+        ),
+
+        const SizedBox(height: 10),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: FC.card,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: FC.border),
+          ),
+          child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Print after complete',
+              style: TextStyle(color: FC.text, fontWeight: FontWeight.w900, fontSize: 12)),
+            SizedBox(height: 5),
+            Text('Customer receipt + kitchen/drink ticket. Route can be set to same receipt printer, kitchen printer, or drink label printer.',
+              style: TextStyle(color: FC.textMute, fontWeight: FontWeight.w700, fontSize: 11, height: 1.35)),
           ]),
         ),
 

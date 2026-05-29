@@ -88,7 +88,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
               itemBuilder: (_, i) => ProductCard(
                 product: visible[i],
                 inCart: inCart.contains(visible[i].id),
-                onAdd: () => ref.read(cartProvider.notifier).add(visible[i]),
+                onAdd: () => _addProduct(visible[i]),
               ),
             ),
       ),
@@ -113,6 +113,26 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     builder: (_) => _FeatureSheet(title: title),
   );
 
+  Future<void> _addProduct(Product product) async {
+    if (!product.hasOptions) {
+      ref.read(cartProvider.notifier).add(product);
+      return;
+    }
+    final line = await showModalBottomSheet<CartLine>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _ProductOptionsSheet(product: product),
+    );
+    if (line == null) return;
+    ref.read(cartProvider.notifier).add(
+      product,
+      size: line.size,
+      sugar: line.sugar,
+      addons: line.addons,
+    );
+  }
+
   Future<void> _openPayment() async {
     final cart = ref.read(cartProvider);
     if (cart.isEmpty) return;
@@ -134,6 +154,175 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       ref.read(cartProvider.notifier).reset();
       ref.read(paymentMethodProvider.notifier).state = null;
     }
+  }
+}
+
+class _ProductOptionsSheet extends StatefulWidget {
+  final Product product;
+  const _ProductOptionsSheet({required this.product});
+
+  @override
+  State<_ProductOptionsSheet> createState() => _ProductOptionsSheetState();
+}
+
+class _ProductOptionsSheetState extends State<_ProductOptionsSheet> {
+  String _size = 'M';
+  String _sugar = '100%';
+  final Set<String> _addonNames = {};
+
+  static const _addons = [
+    LineAddon('Boba', 0.75),
+    LineAddon('Crystal Boba', 0.85),
+    LineAddon('Pudding', 0.75),
+    LineAddon('Less Ice', 0.00),
+    LineAddon('No Ice', 0.00),
+    LineAddon('Extra Sweet', 0.00),
+  ];
+
+  double get _sizePrice => switch (_size) {
+    'S' => -0.50,
+    'L' => 1.00,
+    _ => 0.00,
+  };
+
+  List<LineAddon> get _selectedAddons =>
+      _addons.where((a) => _addonNames.contains(a.name)).toList();
+
+  double get _unitTotal =>
+      widget.product.price + _sizePrice + _selectedAddons.fold(0.0, (s, a) => s + a.price);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: FC.panel,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: FC.border),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Text(widget.product.emoji, style: const TextStyle(fontSize: 34)),
+            const SizedBox(width: 12),
+            Expanded(child: Text(widget.product.name,
+              style: const TextStyle(color: FC.text, fontWeight: FontWeight.w900, fontSize: 22))),
+            IconButton(
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.close, color: FC.text),
+            ),
+          ]),
+          const SizedBox(height: 14),
+          _section('Size', [
+            _choice('S', '-${kCurrencySymbol}0.50', _size == 'S', () => setState(() => _size = 'S')),
+            _choice('M', 'Included', _size == 'M', () => setState(() => _size = 'M')),
+            _choice('L', '+${kCurrencySymbol}1.00', _size == 'L', () => setState(() => _size = 'L')),
+          ]),
+          _section('Sugar', [
+            for (final s in const ['0%', '25%', '50%', '75%', '100%'])
+              _choice(s, '', _sugar == s, () => setState(() => _sugar = s)),
+          ]),
+          const Text('Toppings & Add-ons',
+            style: TextStyle(color: FC.text, fontWeight: FontWeight.w900, fontSize: 13)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final addon in _addons)
+                _addonChip(addon),
+            ],
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: FC.primary,
+                foregroundColor: FC.bg,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              onPressed: () => Navigator.pop(context, CartLine(
+                product: widget.product,
+                qty: 1,
+                size: _size,
+                sugar: _sugar,
+                addons: _selectedAddons,
+              )),
+              child: Text('Add to Order · $kCurrencySymbol${_unitTotal.toStringAsFixed(2)}',
+                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _section(String title, List<Widget> children) => Padding(
+    padding: const EdgeInsets.only(bottom: 14),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(title, style: const TextStyle(color: FC.text, fontWeight: FontWeight.w900, fontSize: 13)),
+      const SizedBox(height: 8),
+      Wrap(spacing: 8, runSpacing: 8, children: children),
+    ]),
+  );
+
+  Widget _choice(String title, String sub, bool selected, VoidCallback onTap) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(12),
+    child: Container(
+      width: 112,
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: selected ? FC.primaryA : FC.card,
+        border: Border.all(color: selected ? FC.primary : FC.border),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(children: [
+        Text(title, style: TextStyle(
+          color: selected ? FC.primary : FC.text,
+          fontWeight: FontWeight.w900,
+          fontSize: 14,
+        )),
+        if (sub.isNotEmpty) Text(sub, style: const TextStyle(
+          color: FC.textMute,
+          fontWeight: FontWeight.w700,
+          fontSize: 10,
+        )),
+      ]),
+    ),
+  );
+
+  Widget _addonChip(LineAddon addon) {
+    final selected = _addonNames.contains(addon.name);
+    return InkWell(
+      onTap: () => setState(() {
+        selected ? _addonNames.remove(addon.name) : _addonNames.add(addon.name);
+      }),
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color: selected ? FC.primaryA : FC.card,
+          border: Border.all(color: selected ? FC.primary : FC.border),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          addon.price == 0
+              ? '${addon.name} · Free'
+              : '${addon.name} · +$kCurrencySymbol${addon.price.toStringAsFixed(2)}',
+          style: TextStyle(
+            color: selected ? FC.primary : FC.text,
+            fontWeight: FontWeight.w900,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
   }
 }
 

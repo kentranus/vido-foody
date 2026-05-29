@@ -2,9 +2,10 @@
 class Product {
   final String id, name, emoji, category;
   final double price;
+  final bool hasOptions;
   const Product({
     required this.id, required this.name, required this.emoji,
-    required this.category, required this.price,
+    required this.category, required this.price, this.hasOptions = false,
   });
 }
 
@@ -21,12 +22,12 @@ const kCategories = <Category>[
 ];
 
 const kProducts = <Product>[
-  Product(id: 'p1',  category: 'drink',   name: 'Bubble Milk Tea',       emoji: '🧋', price: 4.50),
-  Product(id: 'p2',  category: 'drink',   name: 'Strawberry Sting',      emoji: '🥤', price: 1.80),
-  Product(id: 'p3',  category: 'drink',   name: 'Fresh Orange Juice',    emoji: '🍊', price: 3.20),
-  Product(id: 'p4',  category: 'drink',   name: 'Lemon Soda',            emoji: '🍋', price: 2.50),
-  Product(id: 'p5',  category: 'coffee',  name: 'Iced Milk Coffee',      emoji: '☕', price: 3.50),
-  Product(id: 'p6',  category: 'coffee',  name: 'Iced White Coffee',     emoji: '🥛', price: 3.80),
+  Product(id: 'p1',  category: 'drink',   name: 'Bubble Milk Tea',       emoji: '🧋', price: 4.50, hasOptions: true),
+  Product(id: 'p2',  category: 'drink',   name: 'Strawberry Sting',      emoji: '🥤', price: 1.80, hasOptions: true),
+  Product(id: 'p3',  category: 'drink',   name: 'Fresh Orange Juice',    emoji: '🍊', price: 3.20, hasOptions: true),
+  Product(id: 'p4',  category: 'drink',   name: 'Lemon Soda',            emoji: '🍋', price: 2.50, hasOptions: true),
+  Product(id: 'p5',  category: 'coffee',  name: 'Iced Milk Coffee',      emoji: '☕', price: 3.50, hasOptions: true),
+  Product(id: 'p6',  category: 'coffee',  name: 'Iced White Coffee',     emoji: '🥛', price: 3.80, hasOptions: true),
   Product(id: 'p7',  category: 'coffee',  name: 'Espresso',              emoji: '☕', price: 2.80),
   Product(id: 'p8',  category: 'coffee',  name: 'Cappuccino',            emoji: '☕', price: 4.20),
   Product(id: 'p9',  category: 'food',    name: 'Grilled Pork Banh Mi',  emoji: '🥖', price: 4.00),

@@ -77,7 +77,7 @@ class ProductCard extends StatelessWidget {
                   child: Text(
                     inCart ? 'Added' : '+ Add',
                     style: TextStyle(
-                      color: inCart ? FC.bg : FC.text,
+                      color: FC.bg,
                       fontWeight: FontWeight.w900, fontSize: 12),
                   ),
                 ),

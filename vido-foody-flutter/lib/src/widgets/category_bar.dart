@@ -31,7 +31,7 @@ class CategoryBar extends StatelessWidget {
           children: [
             _Pill(
               label: 'All Items', icon: '🍱',
-              active: active == 'all', accent: FC.orange,
+              active: active == 'all',
               onTap: () => onSelect('all'),
             ),
             for (final c in kCategories) _Pill(
@@ -49,16 +49,15 @@ class CategoryBar extends StatelessWidget {
 class _Pill extends StatelessWidget {
   final String label, icon;
   final bool active;
-  final Color? accent;
   final VoidCallback onTap;
   const _Pill({
-    required this.label, required this.icon,
-    required this.active, this.accent, required this.onTap,
+    required this.label, required this.icon, required this.active, required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final bg = active ? (accent ?? FC.primary) : FC.card;
+    final bg = active ? FC.primaryA : FC.card;
+    final border = active ? FC.primary : FC.border;
     return Padding(
       padding: const EdgeInsets.only(right: 6),
       child: InkWell(
@@ -68,7 +67,7 @@ class _Pill extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
             color: bg, borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: active ? bg : FC.border),
+            border: Border.all(color: border),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Container(
@@ -82,7 +81,7 @@ class _Pill extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(label, style: TextStyle(
-              color: active ? FC.bg : FC.text,
+              color: active ? FC.primary : FC.text,
               fontWeight: FontWeight.w900, fontSize: 12,
             )),
           ]),
