@@ -43,6 +43,13 @@ jobs:
         working-directory: vido-foody-flutter
         run: rm -f test/widget_test.dart
 
+      - name: Use Gradle 8.7 for current Flutter
+        working-directory: vido-foody-flutter
+        run: |
+          if [ -f android/gradle/wrapper/gradle-wrapper.properties ]; then
+            sed -i 's#gradle-[0-9.]*-all.zip#gradle-8.7-all.zip#g' android/gradle/wrapper/gradle-wrapper.properties
+          fi
+
       - name: Install Flutter dependencies
         working-directory: vido-foody-flutter
         run: flutter pub get
