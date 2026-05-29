@@ -1,125 +1,44 @@
-# Vido Foody Flutter
+# Vido POS — Dual-Screen
 
-Production-direction Flutter tablet POS app for Vido Foody with a Node.js backend.
+Mobile-first Android POS with Customer-Facing Display on a secondary screen.
 
-The React/Capacitor version is only a UI/business-logic reference. This folder is the app your Flutter team should continue from.
+- **App ID**: `com.vido.pos.dual`
+- **Label**: "Vido POS Dual"
+- **Use case**: dual-screen POS terminal (Sunmi, Imin, Pax, RK3588…) where the
+  customer sees a separate live receipt on the back screen
+- **Hardware**: any Android device with a secondary display exposed via the
+  Android Presentation API (HDMI / USB-C / built-in second screen)
 
-## Run Backend
+## Features
 
-```bash
-cd ../vido-foody-backend
-npm start
-```
+Everything in the Single version, plus:
 
-Backend default URL: `http://localhost:8787`
+- **Customer Display** plugin (Kotlin Presentation API + WebView)
+- Live receipt sync — cart updates push to the secondary screen in real time
+- Payment state transitions (welcome → order → waiting → done)
+- Diagnostic UI showing all detected displays + troubleshooting steps for RK3588
+- "Test on first secondary" button to force-render demo data
+- **PAX terminal integration** (same as Single) — when "Card" is selected,
+  the customer screen shows "Please tap or insert your card" while the
+  PAX terminal handles the transaction
 
-Backend data is saved to:
-
-```text
-vido-foody-backend/data/vido-foody-state.json
-```
-
-Override with:
-
-```bash
-VIDO_DATA_FILE=/path/to/vido-foody-state.json npm start
-```
-
-For Android tablet testing, use the computer/server IP instead of `localhost`. Example:
-
-```text
-http://192.168.68.55:8787
-```
-
-## Run Flutter
+## Build
 
 ```bash
-flutter create .
 flutter pub get
-flutter run
+flutter build apk --release
 ```
 
-After `flutter create .`, make sure Android allows cleartext HTTP for local backend testing by adding this to the generated Android manifest application tag:
+Or push to GitHub → Actions builds debug + release APKs automatically.
 
-```xml
-android:usesCleartextTraffic="true"
-```
+## Setup
 
-## Included POS Features
+1. **PAX**: see `android/app/libs/README.md`
+2. **Customer screen**: connect a second display, open app → tap "CFD" pill in
+   top bar → toggle on. If no secondary display detected, follow the
+   on-screen troubleshooting steps.
 
-- Sell screen with 4-column menu grid.
-- Large category buttons and large Add buttons.
-- Light/dark mode.
-- Cash, Card Payment, and Gift Card payment labels.
-- Tip flow on customer display/POS screen or PAX terminal mode.
-- Operations screen with closeout, drawer, online order count, and batch status.
-- Online Orders queue for website/marketplace orders.
-- History and Reports screens.
-- Payment Settings with TCP/IP, USB, timeout, settlement, and PAX mode controls.
-- Vido Foody logo asset.
+## Side-by-side install
 
-## Card Payment
-
-Preferred production path:
-
-```text
-Flutter Android MethodChannel
-→ PAX POSLink Java Android SDK
-→ PAX/BroadPOS terminal
-```
-
-Method channel name reserved in the app:
-
-```text
-vido.foody/poslink
-```
-
-Required native methods:
-
-```text
-testConnection
-sale
-batchClose
-openCashDrawer
-printReceipt
-customerDisplay
-```
-
-Development fallback:
-
-```text
-POST /api/payment/sale
-```
-
-The Node backend sends BroadPOS TCP to the card terminal on port `10009`. USB payment must be implemented through the Flutter Android native channel, not Node.js.
-
-## Platform Login / Store Accounts
-
-The backend now has a pilot account/store system.
-
-Default dev login:
-
-```text
-owner@vidofoody.local
-demo1234
-```
-
-Flutter still needs a real login screen and secure token storage. Required flow:
-
-```text
-POST /api/auth/login
-Save token securely
-GET /api/stores/me
-Register device with POST /api/devices/register
-Open GET /api/events for realtime order updates
-```
-
-Online and kiosk orders share the same backend queue:
-
-```text
-POST /api/online-orders
-POST /api/online-orders/{id}/accept
-POST /api/online-orders/{id}/reject
-POST /api/online-orders/{id}/print
-POST /api/kiosk/orders
-```
+Different `applicationId` from Single (`com.vido.pos.dual` vs
+`com.vido.pos.single`) → both can be installed on the same device for testing.
