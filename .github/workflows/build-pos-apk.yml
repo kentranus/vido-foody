@@ -1,4 +1,4 @@
-name: Flutter and Node Check
+name: Build Vido Foody POS APK
 
 on:
   push:
@@ -28,8 +28,8 @@ jobs:
         working-directory: vido-foody-backend
         run: node --check src/server.js
 
-  flutter-app:
-    name: Flutter App Check
+  build-pos-apk:
+    name: Build POS APK
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -46,17 +46,17 @@ jobs:
         working-directory: vido-foody-flutter
         run: flutter pub get
 
-      - name: Analyze Flutter app
+      - name: Analyze Flutter POS app
         working-directory: vido-foody-flutter
         run: flutter analyze
 
-      - name: Build Android APK
+      - name: Build Android POS APK
         working-directory: vido-foody-flutter
         run: flutter build apk --debug
 
-      - name: Upload APK
+      - name: Upload POS APK
         uses: actions/upload-artifact@v5
         with:
-          name: vido-foody-flutter-debug-apk
+          name: vido-foody-pos-debug-apk
           path: vido-foody-flutter/build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 30
