@@ -203,44 +203,46 @@ class PosLinkSdk private constructor(
     // Internal — reflection helpers
     // ===================================================================
     private fun newPosLinkWithComm(c: CommSetting): Any {
-        val comm = commSettingClass!!.getConstructor().newInstance()
+        val commCls = requireNotNull(commSettingClass) { "CommSetting class is not loaded" }
+        val posLinkCls = requireNotNull(posLinkClass) { "POSLink class is not loaded" }
+        val comm = commCls.getConstructor().newInstance()
 
         // commSetting.setType(CommSetting.TCP)  via reflected static field
-        val typeConst = commSettingClass.getField(c.commType).get(null) as String
-        commSettingClass.getMethod("setType", String::class.java).invoke(comm, typeConst)
-        commSettingClass.getMethod("setTimeOut", String::class.java).invoke(comm, c.timeoutMs)
+        val typeConst = commCls.getField(c.commType).get(null) as String
+        commCls.getMethod("setType", String::class.java).invoke(comm, typeConst)
+        commCls.getMethod("setTimeOut", String::class.java).invoke(comm, c.timeoutMs)
 
         when (c.commType) {
             "TCP", "HTTP", "HTTPS", "SSL" -> {
-                commSettingClass.getMethod("setDestIP", String::class.java).invoke(comm, c.destIp)
-                commSettingClass.getMethod("setDestPort", String::class.java).invoke(comm, c.destPort)
+                commCls.getMethod("setDestIP", String::class.java).invoke(comm, c.destIp)
+                commCls.getMethod("setDestPort", String::class.java).invoke(comm, c.destPort)
             }
             "UART" -> {
-                commSettingClass.getMethod("setSerialPort", String::class.java).invoke(comm, c.serialPort)
-                commSettingClass.getMethod("setBaudRate", String::class.java).invoke(comm, c.baudRate)
+                commCls.getMethod("setSerialPort", String::class.java).invoke(comm, c.serialPort)
+                commCls.getMethod("setBaudRate", String::class.java).invoke(comm, c.baudRate)
             }
             "USB" -> {
                 runCatching {
-                    commSettingClass.getMethod("setEnableProxy", java.lang.Boolean.TYPE)
+                    commCls.getMethod("setEnableProxy", java.lang.Boolean.TYPE)
                         .invoke(comm, c.enableProxy)
                 }
             }
             "BT" -> {
                 runCatching {
-                    commSettingClass.getMethod("setMacAddr", String::class.java)
+                    commCls.getMethod("setMacAddr", String::class.java)
                         .invoke(comm, c.destIp)   // re-use destIp field as the MAC
                 }
             }
             "AIDL" -> { /* no extra parameters needed */ }
         }
 
-        val posLink = posLinkClass!!.getConstructor().newInstance()
+        val posLink = posLinkCls.getConstructor().newInstance()
         // Either field-style ("CommSetting = comm") or setter ("SetCommSetting(comm)")
         // depending on SDK version. Try both.
         runCatching {
-            posLinkClass.getMethod("SetCommSetting", commSettingClass).invoke(posLink, comm)
+            posLinkCls.getMethod("SetCommSetting", commCls).invoke(posLink, comm)
         }.onFailure {
-            posLinkClass.getField("CommSetting").set(posLink, comm)
+            posLinkCls.getField("CommSetting").set(posLink, comm)
         }
         return posLink
     }
