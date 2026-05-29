@@ -50,6 +50,16 @@ jobs:
             sed -i 's#gradle-[0-9.]*-all.zip#gradle-8.7-all.zip#g' android/gradle/wrapper/gradle-wrapper.properties
           fi
 
+      - name: Use Android Gradle Plugin 8.6 for current Flutter
+        working-directory: vido-foody-flutter
+        run: |
+          if [ -f android/settings.gradle.kts ]; then
+            sed -i 's/id("com.android.application") version "[0-9.]*"/id("com.android.application") version "8.6.0"/g' android/settings.gradle.kts
+          fi
+          if [ -f android/settings.gradle ]; then
+            sed -i "s/id 'com.android.application' version '[0-9.]*'/id 'com.android.application' version '8.6.0'/g" android/settings.gradle
+          fi
+
       - name: Install Flutter dependencies
         working-directory: vido-foody-flutter
         run: flutter pub get
