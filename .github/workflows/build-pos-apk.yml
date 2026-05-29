@@ -2,7 +2,7 @@ name: Build Vido Foody POS APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -29,15 +29,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
 
-      - name: Create Flutter platform files if needed
+      - name: Remove stale Flutter sample test if present
         working-directory: vido-foody-flutter
-        run: |
-          flutter create .
-          rm -f test/widget_test.dart
+        run: rm -f test/widget_test.dart
 
       - name: Install Flutter dependencies
         working-directory: vido-foody-flutter
