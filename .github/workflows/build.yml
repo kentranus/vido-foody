@@ -1,4 +1,4 @@
-name: Build APK
+name: Build Vido Foody POS APK
 
 on:
   push:
@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      APP_MODE: pos
+      VITE_APP_MODE: pos
     steps:
       - uses: actions/checkout@v6
 
@@ -92,13 +94,13 @@ jobs:
           ./gradlew assembleDebug --stacktrace
 
       - name: Rename APK
-        run: cp tablet-app/android/app/build/outputs/apk/debug/app-debug.apk vido-foody-build-${{ github.run_number }}.apk
+        run: cp tablet-app/android/app/build/outputs/apk/debug/app-debug.apk vido-foody-pos-build-${{ github.run_number }}.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v5
         with:
-          name: vido-foody-apk-build-${{ github.run_number }}
-          path: vido-foody-build-${{ github.run_number }}.apk
+          name: vido-foody-pos-apk-build-${{ github.run_number }}
+          path: vido-foody-pos-build-${{ github.run_number }}.apk
           retention-days: 30
 
       - name: Upload build logs on failure
