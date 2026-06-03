@@ -7,6 +7,7 @@ import { SHOP, formatUSD } from '../config';
 import { paxService, getDebugLog, clearDebugLog, PAX_STATUS } from '../services/paxBridge';
 import { hardwareService } from '../services/hardwareBridge';
 import { customerDisplayService } from '../services/customerDisplayBridge';
+import { orderHubService } from '../services/orderHubService';
 import { saveMenu, saveCategories, resetMenuToDefaults } from '../services/menuStorage';
 import { loadStaff, addStaff, updateStaff, deleteStaff } from '../services/staffStorage';
 import { APP_VERSION, BUILD_DATE, BUILD_NUMBER, COMMIT_SHORT } from '../version';
@@ -21,7 +22,7 @@ export function SettingsView({ menu, categories, refreshMenu, staff, initialTab 
 
   useEffect(() => { setTab(initialTab); }, [initialTab]);
 
-  const requiresManager = (tabId) => ['staff', 'pax', 'hardware', 'display'].includes(tabId);
+  const requiresManager = (tabId) => ['staff', 'pax', 'hardware', 'display', 'hub'].includes(tabId);
 
   const switchTab = (tabId) => {
     if (requiresManager(tabId) && staff.role !== 'manager' && unlockedTab !== tabId) {
@@ -40,6 +41,7 @@ export function SettingsView({ menu, categories, refreshMenu, staff, initialTab 
           { id: 'pax',   label: 'Payment Settings', requiresMgr: true },
           { id: 'hardware', label: 'Hardware', requiresMgr: true },
           { id: 'display', label: 'Displays', requiresMgr: true },
+          { id: 'hub', label: 'Kiosk / Online', requiresMgr: true },
           { id: 'menu',  label: 'Menu Editor' },
           { id: 'staff', label: 'Staff', requiresMgr: true },
           { id: 'shop',  label: 'Shop Info' },
@@ -66,6 +68,7 @@ export function SettingsView({ menu, categories, refreshMenu, staff, initialTab 
         {tab === 'pax' && <PaxSettings />}
         {tab === 'hardware' && <HardwareSettings />}
         {tab === 'display' && <DisplaySettings />}
+        {tab === 'hub' && <HubSettings />}
         {tab === 'menu' && <MenuEditor menu={menu} categories={categories} refreshMenu={refreshMenu} />}
         {tab === 'staff' && <StaffManager />}
         {tab === 'shop' && <ShopInfo />}
@@ -104,7 +107,13 @@ function PaxSettings() {
   const [showLog, setShowLog] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  useEffect(() => { setCfg({ ...paxService.config }); }, []);
+  useEffect(() => {
+    let alive = true;
+    paxService.ready.then(() => {
+      if (alive) setCfg({ ...paxService.config });
+    });
+    return () => { alive = false; };
+  }, []);
 
   // Refresh log periodically while open
   useEffect(() => {
@@ -123,9 +132,15 @@ function PaxSettings() {
   };
 
   const save = async () => {
-    await paxService.updateConfig(cfg);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setResult(null);
+    try {
+      await paxService.updateConfig(cfg);
+      setCfg({ ...paxService.config });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setResult({ ok: false, error: e.message || 'Could not save payment settings' });
+    }
   };
 
   const runTestSale = async () => {
@@ -463,6 +478,278 @@ function PaxSettings() {
             Use this to verify protocol format with payment terminal support.
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// POS HUB SETTINGS — kiosk and online order bridge
+// ============================================================================
+function HubSettings() {
+  const [cfg, setCfg] = useState({ ...orderHubService.config });
+  const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testingTerminal, setTestingTerminal] = useState(false);
+  const [result, setResult] = useState(null);
+  const [terminalResult, setTerminalResult] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    orderHubService.ready.then(() => {
+      if (alive) setCfg({ ...orderHubService.config });
+    });
+    return () => { alive = false; };
+  }, []);
+
+  const save = async () => {
+    const next = await orderHubService.updateConfig(cfg);
+    setCfg({ ...next });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1800);
+  };
+
+  const test = async () => {
+    setTesting(true);
+    setResult(null);
+    const next = await orderHubService.updateConfig(cfg);
+    const r = await orderHubService.ping(next);
+    setTesting(false);
+    setResult(r);
+  };
+
+  const updateKioskPax = (patch) => {
+    setCfg({ ...cfg, kioskPax: { ...(cfg.kioskPax || {}), ...patch } });
+  };
+
+  const testKioskTerminal = async () => {
+    const kioskPax = { ...(cfg.kioskPax || {}) };
+    setTerminalResult(null);
+    if ((kioskPax.connectionMode || 'tcp') === 'tcp' && !String(kioskPax.ip || '').trim()) {
+      setTerminalResult({ ok: false, error: 'Enter kiosk PAX IP first' });
+      return;
+    }
+    setTestingTerminal(true);
+    await orderHubService.updateConfig(cfg);
+    const oldPax = { ...paxService.config };
+    try {
+      await paxService.updateConfig({
+        ...oldPax,
+        connectionMode: kioskPax.connectionMode || 'tcp',
+        terminalSerial: kioskPax.terminalSerial || '',
+        ip: kioskPax.ip || '',
+        port: Number(kioskPax.port || 10009),
+        timeout: Number(kioskPax.timeout || 60000),
+        tipRequest: kioskPax.tipRequest !== false,
+        usePosLinkSdk: kioskPax.usePosLinkSdk !== false,
+      });
+      const r = await paxService.ping();
+      setTerminalResult(r);
+    } catch (e) {
+      setTerminalResult({ ok: false, error: e.message || 'Terminal test failed' });
+    } finally {
+      await paxService.updateConfig(oldPax);
+      setTestingTerminal(false);
+    }
+  };
+
+  const kioskPax = { ...(orderHubService.config.kioskPax || {}), ...(cfg.kioskPax || {}) };
+
+  return (
+    <div style={{ maxWidth: 760 }}>
+      <div style={{ background: C.panel, padding: 18, borderRadius: 12, marginBottom: 14 }}>
+        <div style={{ fontSize: 11, fontWeight: 900, color: C.textMute, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 }}>
+          POS Hub for kiosk and online orders
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, color: C.text, fontSize: 15, fontWeight: 900, marginBottom: 16 }}>
+          <input
+            type="checkbox"
+            checked={!!cfg.enabled}
+            onChange={e => setCfg({ ...cfg, enabled: e.target.checked })}
+          />
+          Enable POS Hub connection
+        </label>
+        <Field
+          label="POS Hub URL"
+          hint="Use the POS/Hub computer IP on the store network, for example http://192.168.68.55:8787"
+        >
+          <Input
+            value={cfg.hubUrl || ''}
+            placeholder="http://192.168.68.55:8787"
+            onChange={e => setCfg({ ...cfg, hubUrl: e.target.value })}
+          />
+        </Field>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Field label="Store ID">
+            <Input value={cfg.storeId || ''} onChange={e => setCfg({ ...cfg, storeId: e.target.value })} />
+          </Field>
+          <Field label="This Device ID">
+            <Input value={cfg.stationId || ''} onChange={e => setCfg({ ...cfg, stationId: e.target.value })} />
+          </Field>
+        </div>
+        <div style={{ display: 'grid', gap: 10, marginTop: 6 }}>
+          <label style={s.checkLine}>
+            <input type="checkbox" checked={!!cfg.autoAcceptKioskOrders}
+              onChange={e => setCfg({ ...cfg, autoAcceptKioskOrders: e.target.checked })} />
+            Auto accept paid kiosk / online orders on this POS
+          </label>
+          <label style={s.checkLine}>
+            <input type="checkbox" checked={!!cfg.autoPrintKitchenTickets}
+              onChange={e => setCfg({ ...cfg, autoPrintKitchenTickets: e.target.checked })} />
+            Auto print kitchen/drink ticket after POS receives paid order
+          </label>
+          <label style={s.checkLine}>
+            <input type="checkbox" checked={!!cfg.autoPrintCustomerReceipts}
+              onChange={e => setCfg({ ...cfg, autoPrintCustomerReceipts: e.target.checked })} />
+            Auto print customer receipt for kiosk orders
+          </label>
+        </div>
+      </div>
+
+      <div style={{ background: C.panel, padding: 18, borderRadius: 12, marginBottom: 14 }}>
+        <div style={{ fontSize: 11, fontWeight: 900, color: C.textMute, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 }}>
+          Kiosk payment terminal
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, color: C.text, fontSize: 15, fontWeight: 900, marginBottom: 16 }}>
+          <input
+            type="checkbox"
+            checked={kioskPax.enabled !== false}
+            onChange={e => updateKioskPax({ enabled: e.target.checked })}
+          />
+          Enable separate PAX terminal for kiosk Pay Now
+        </label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Field label="Connection">
+            <select
+              value={kioskPax.connectionMode || 'tcp'}
+              onChange={e => updateKioskPax({ connectionMode: e.target.value })}
+              style={s.select}
+            >
+              <option value="tcp">TCP/IP</option>
+              <option value="usb">USB via POSLink SDK</option>
+              <option value="serial">Serial number</option>
+            </select>
+          </Field>
+          <Field label="PAX terminal IP">
+            <Input
+              value={kioskPax.ip || ''}
+              placeholder="192.168.68.59"
+              disabled={(kioskPax.connectionMode || 'tcp') !== 'tcp'}
+              onChange={e => updateKioskPax({ ip: e.target.value })}
+            />
+          </Field>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Field label="Port" hint="Most BroadPOS terminals use 10009">
+            <Input
+              value={kioskPax.port || 10009}
+              type="number"
+              disabled={(kioskPax.connectionMode || 'tcp') !== 'tcp'}
+              onChange={e => updateKioskPax({ port: Number(e.target.value || 10009) })}
+            />
+          </Field>
+          <Field label="Timeout (ms)" hint="60000 = 60 seconds">
+            <Input
+              value={kioskPax.timeout || 60000}
+              type="number"
+              onChange={e => updateKioskPax({ timeout: Number(e.target.value || 60000) })}
+            />
+          </Field>
+        </div>
+        {(kioskPax.connectionMode || 'tcp') === 'usb' && (
+          <div style={{
+            padding: '10px 12px',
+            borderRadius: 10,
+            marginBottom: 12,
+            background: 'rgba(252, 211, 77, 0.10)',
+            color: C.text,
+            fontSize: 12,
+            fontWeight: 800,
+            lineHeight: 1.5,
+          }}>
+            USB mode does not use IP or port. On the Android kiosk, connect the PAX terminal by USB,
+            allow USB permission, and keep POSLink SDK enabled.
+          </div>
+        )}
+        {(kioskPax.connectionMode || 'tcp') === 'serial' && (
+          <div style={{
+            padding: '10px 12px',
+            borderRadius: 10,
+            marginBottom: 12,
+            background: 'rgba(252, 211, 77, 0.10)',
+            color: C.text,
+            fontSize: 12,
+            fontWeight: 800,
+            lineHeight: 1.5,
+          }}>
+            Serial pairing is saved here for future support. For live payment today, use TCP/IP or USB.
+          </div>
+        )}
+        <Field label="Terminal serial number" hint="Optional. Use only if your PAX setup pairs by serial instead of TCP/IP.">
+          <Input
+            value={kioskPax.terminalSerial || ''}
+            placeholder="Optional"
+            onChange={e => updateKioskPax({ terminalSerial: e.target.value })}
+          />
+        </Field>
+        <div style={{ display: 'grid', gap: 10, marginTop: 6 }}>
+          <label style={s.checkLine}>
+            <input type="checkbox" checked={kioskPax.tipRequest !== false}
+              onChange={e => updateKioskPax({ tipRequest: e.target.checked })} />
+            Show tip on PAX terminal when kiosk uses Pay Now
+          </label>
+          <label style={s.checkLine}>
+            <input type="checkbox" checked={kioskPax.usePosLinkSdk !== false}
+              onChange={e => updateKioskPax({ usePosLinkSdk: e.target.checked })} />
+            Use PAX POSLink SDK in Android build
+          </label>
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
+          <Button variant="ghost" onClick={testKioskTerminal} disabled={testingTerminal || kioskPax.enabled === false}>
+            {testingTerminal ? <><RefreshCw size={14} className="spin" /> Testing...</> : `Test Kiosk PAX (${(kioskPax.connectionMode || 'tcp').toUpperCase()})`}
+          </Button>
+        </div>
+        {terminalResult && (
+          <div style={{
+            marginTop: 12,
+            padding: '10px 14px',
+            borderRadius: 10,
+            fontSize: 13,
+            fontWeight: 900,
+            color: terminalResult.ok ? C.green : C.red,
+            background: terminalResult.ok ? 'rgba(74,222,128,0.12)' : C.redA,
+          }}>
+            {terminalResult.ok
+              ? `Kiosk terminal connected${terminalResult.web ? ' (web preview simulated)' : ''}`
+              : `Kiosk terminal failed: ${terminalResult.error}`}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+        <Button variant="ghost" onClick={test} disabled={testing || !cfg.hubUrl}>
+          {testing ? <><RefreshCw size={14} className="spin" /> Testing...</> : 'Test POS Hub'}
+        </Button>
+        <Button onClick={save}>
+          {saved ? <><Check size={14} /> Saved</> : 'Save Kiosk / Online Settings'}
+        </Button>
+      </div>
+
+      {result && (
+        <div style={{
+          padding: '10px 14px',
+          borderRadius: 10,
+          fontSize: 13,
+          fontWeight: 900,
+          color: result.ok ? C.green : C.red,
+          background: result.ok ? 'rgba(74,222,128,0.12)' : C.redA,
+        }}>
+          {result.ok ? `Connected to ${result.service}` : `Failed: ${result.error}`}
+        </div>
+      )}
+
+      <div style={{ marginTop: 14, color: C.textMute, fontSize: 13, fontWeight: 800, lineHeight: 1.6 }}>
+        Each kiosk can use its own PAX IP/port above. After PAX approves payment, the kiosk sends the paid order to this POS Hub. The POS receives it in Operations, shares one order number, and prints the ticket.
       </div>
     </div>
   );
@@ -1533,6 +1820,19 @@ const s = {
     maxWidth: '100%',
   },
   tabContent: { flex: 1, overflowY: 'auto' },
+  checkLine: { display: 'flex', alignItems: 'center', gap: 10, color: C.text, fontSize: 13, fontWeight: 800 },
+  select: {
+    width: '100%',
+    minHeight: 38,
+    borderRadius: 10,
+    border: `1px solid ${C.border}`,
+    background: C.card,
+    color: C.text,
+    padding: '8px 10px',
+    fontSize: 14,
+    fontWeight: 800,
+    outline: 'none',
+  },
   sectionHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 10 },
   catEditCard: {
     background: C.card, padding: '8px 12px',

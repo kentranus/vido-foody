@@ -1,8 +1,11 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
+const appMode = process.env.VITE_APP_MODE || process.env.APP_MODE || 'pos';
+const isKiosk = appMode === 'kiosk';
+
 const config: CapacitorConfig = {
-  appId: 'com.vido.foody',
-  appName: 'Vido Foody',
+  appId: isKiosk ? 'com.vido.foody.kiosk' : 'com.vido.foody.pos',
+  appName: isKiosk ? 'Vido Foody Kiosk' : 'Vido Foody POS',
   webDir: 'dist',
   bundledWebRuntime: false,
   android: {

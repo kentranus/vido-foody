@@ -13,11 +13,19 @@ import { loadShop, saveShop } from './services/shopStorage';
 import { DEFAULT_MENU, DEFAULT_CATEGORIES } from './data/defaultMenu';
 import { APP_VERSION, BUILD_NUMBER } from './version';
 import { PinLockScreen } from './components/Shared';
-import { OrderView } from './views/OrderView';
+import { OrderView, KioskOrderView } from './views/OrderView';
 import { HistoryView } from './views/HistoryView';
 import { ReportsView } from './views/ReportsView';
 import { OperationsView } from './views/OperationsView';
 import { SettingsView } from './views/SettingsView';
+
+const APP_MODE = import.meta.env.VITE_APP_MODE || 'pos';
+const IS_KIOSK_APP = APP_MODE === 'kiosk';
+const KIOSK_STAFF = {
+  id: 'kiosk',
+  name: 'Kiosk',
+  role: 'kiosk',
+};
 
 // =====================================================================
 // SHOP CONTEXT — globally accessible shop info + updater
@@ -27,8 +35,8 @@ export const useShop = () => useContext(ShopContext);
 
 export default function App() {
   const [theme, setTheme] = useState(getInitialTheme());
-  const [view, setView] = useState('sell');
-  const [staff, setStaff] = useState(null);
+  const [view, setView] = useState(IS_KIOSK_APP ? 'kiosk' : 'sell');
+  const [staff, setStaff] = useState(IS_KIOSK_APP ? KIOSK_STAFF : null);
   const [shop, setShop] = useState(SHOP);
   const [menu, setMenu] = useState(DEFAULT_MENU);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
@@ -60,7 +68,7 @@ export default function App() {
     setMenu(m); setCategories(c);
   };
 
-  if (!staff) {
+  if (!staff && !IS_KIOSK_APP) {
     return (
       <PinLockScreen
         title="Vido Foody"
@@ -72,6 +80,24 @@ export default function App() {
 
   if (loading) {
     return <div style={loadingStyle}>Loading...</div>;
+  }
+
+  if (IS_KIOSK_APP) {
+    return (
+      <ShopContext.Provider value={{ shop, updateShop }}>
+        <div style={appStyle}>
+          <style>{`
+            @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+            @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+            .spin { animation: spin 1.5s linear infinite; }
+            ::-webkit-scrollbar { width: 8px; height: 8px; }
+            ::-webkit-scrollbar-track { background: var(--panel); }
+            ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+          `}</style>
+          <KioskOrderView menu={menu} categories={categories} staff={staff || KIOSK_STAFF} />
+        </div>
+      </ShopContext.Provider>
+    );
   }
 
   return (
@@ -94,6 +120,7 @@ export default function App() {
 
         <div style={contentStyle}>
           {view === 'sell' && <OrderView menu={menu} categories={categories} staff={staff} />}
+          {view === 'kiosk' && <KioskOrderView menu={menu} categories={categories} staff={staff} />}
           {view === 'operations' && <OperationsView staff={staff} />}
           {view === 'orders' && <HistoryView />}
           {view === 'reports' && <ReportsView />}
@@ -131,6 +158,7 @@ function TopBar({ view, openView, theme, toggleTheme, staff, onLogout }) {
 
   const menuItems = [
     { id: 'sell', label: 'Sell / Order Entry', desc: 'Create tickets and take payment', icon: ShoppingCart, view: 'sell' },
+    { id: 'kiosk', label: 'Kiosk Mode', desc: 'Customer self-order screen', icon: Monitor, view: 'kiosk' },
     { id: 'operations', label: 'Operations', desc: 'Queue, closeout, refunds, devices', icon: Activity, view: 'operations' },
     { id: 'orders', label: 'Order History', desc: 'Look up completed receipts', icon: Receipt, view: 'orders' },
     { id: 'reports', label: 'Reports', desc: 'Sales, tender mix, staff totals', icon: BarChart3, view: 'reports' },
@@ -139,11 +167,12 @@ function TopBar({ view, openView, theme, toggleTheme, staff, onLogout }) {
     { id: 'pax', label: 'Payment Settings', desc: 'Card payment connection', icon: CreditCard, view: 'settings', tab: 'pax' },
     { id: 'hardware', label: 'Cash Drawer', desc: 'Drawer/printer hardware setup', icon: Archive, view: 'settings', tab: 'hardware' },
     { id: 'display', label: 'Customer Display', desc: 'Owner/customer screen setup', icon: Monitor, view: 'settings', tab: 'display' },
+    { id: 'hub', label: 'Kiosk / Online Orders', desc: 'Connect kiosks and website orders to POS', icon: Wifi, view: 'settings', tab: 'hub' },
     { id: 'shop', label: 'Shop Info', desc: 'Receipt header, tax, branch info', icon: Store, view: 'settings', tab: 'shop' },
     { id: 'settings', label: 'System Settings', desc: 'Version and diagnostics', icon: SettingsIcon, view: 'settings', tab: 'about' },
     { id: 'support', label: 'Daily Ops', desc: 'Use reports and order history for closeout', icon: LifeBuoy, view: 'reports' },
   ];
-  const viewLabels = { sell: 'Sell', operations: 'Ops', orders: 'Orders', reports: 'Reports', settings: 'Settings' };
+  const viewLabels = { sell: 'Sell', kiosk: 'Kiosk', operations: 'Ops', orders: 'Orders', reports: 'Reports', settings: 'Settings' };
 
   const chooseMenuItem = (item) => {
     setMainMenuOpen(false);

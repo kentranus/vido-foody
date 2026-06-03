@@ -9,6 +9,7 @@ import { paxService, PAX_STATUS } from '../services/paxBridge';
 import { hardwareService } from '../services/hardwareBridge';
 import { customerDisplayService } from '../services/customerDisplayBridge';
 import { saveOrder } from '../services/orderStorage';
+import { orderHubService } from '../services/orderHubService';
 import { Modal, ModalClose, PinLockScreen, Button, Input, Field } from '../components/Shared';
 import { useShop } from '../App';
 
@@ -311,6 +312,7 @@ export function OrderView({ menu, categories, staff }) {
               })),
             };
             saveOrder(finalOrder).catch(e => console.warn('Save order failed:', e));
+            printKitchenTicket(finalOrder).catch(e => console.warn('Kitchen ticket failed:', e));
             customerDisplayService
               .update(customerDisplayService.donePayload({ total: totals.total + (payInfo.tip || 0) }, shop))
               .catch(e => console.warn('Customer display done update failed:', e));
@@ -365,6 +367,236 @@ export function OrderView({ menu, categories, staff }) {
 }
 
 // ============================================================================
+// KIOSK ORDER VIEW — same menu/options as POS, customer-facing checkout
+// ============================================================================
+export function KioskOrderView({ menu, categories, staff }) {
+  const { shop } = useShop();
+  const [order, setOrder] = useState(() => ({ ...emptyOrder(), source: 'kiosk' }));
+  const [activeCat, setActiveCat] = useState('all');
+  const [customizing, setCustomizing] = useState(null);
+  const [payOpen, setPayOpen] = useState(false);
+  const [doneOrder, setDoneOrder] = useState(null);
+
+  const visibleMenu = menu.filter(m => {
+    if (m.isAddon) return false;
+    if (activeCat !== 'all' && m.category !== activeCat) return false;
+    return m.available !== false;
+  });
+  const totals = calcOrderTotals(order);
+
+  useEffect(() => {
+    customerDisplayService
+      .update(customerDisplayService.orderPayload(order, totals, shop))
+      .catch(e => console.warn('Kiosk customer display update failed:', e));
+  }, [order, totals.total, shop]);
+
+  const addLine = (line) => {
+    setOrder(prev => ({ ...prev, items: [...prev.items, line] }));
+  };
+
+  const updateLine = (lineId, updates) => {
+    setOrder(prev => ({
+      ...prev,
+      items: prev.items.map(l => l.id === lineId ? { ...l, ...updates } : l).filter(l => l.qty > 0),
+    }));
+  };
+
+  const selectProduct = (p) => {
+    if (p.category === 'snack' || p.category === 'topping') {
+      addLine({
+        id: 'L' + Date.now(),
+        productId: p.id, name: p.name, emoji: p.emoji,
+        gradient: p.gradient, image: p.image, category: p.category,
+        size: 'R', sugar: 100, ice: 100, toppings: [],
+        basePrice: p.price, qty: 1,
+      });
+    } else {
+      setCustomizing(p);
+    }
+  };
+
+  const completeKioskOrder = async (payInfo) => {
+    const freshTotals = calcOrderTotals(order);
+    const localOrder = {
+      ...order,
+      status: 'complete',
+      source: 'kiosk',
+      tip: payInfo.tip || 0,
+      taxAmount: freshTotals.tax,
+      completedAt: new Date().toISOString(),
+      paymentMethod: 'card',
+      cardLast4: payInfo.cardLast4,
+      cardType: payInfo.cardType,
+      authCode: payInfo.authCode,
+      paxRefNum: payInfo.paxRefNum,
+      paxResponseCode: payInfo.paxResponseCode,
+      paxRaw: payInfo.paxRaw,
+      receiptPhone: payInfo.receiptPhone || '',
+      staffId: staff?.id || 'kiosk',
+      staffName: staff?.name || 'Kiosk',
+      items: order.items.map(line => ({
+        ...line,
+        category: menu.find(m => m.id === line.productId)?.category || line.category,
+      })),
+    };
+    let finalOrder = localOrder;
+    try {
+      const hubResult = await orderHubService.submitOrder(
+        { ...localOrder, status: 'paid' },
+        { source: 'kiosk' },
+      );
+      if (hubResult?.ok && hubResult.order) {
+        finalOrder = { ...localOrder, ...hubResult.order, status: 'complete' };
+      }
+    } catch (e) {
+      console.warn('Kiosk order hub submit failed, saving locally:', e);
+    }
+    await saveOrder(finalOrder);
+    await printKitchenTicket(finalOrder).catch(e => console.warn('Kiosk ticket failed:', e));
+    await customerDisplayService
+      .update(customerDisplayService.donePayload({ total: freshTotals.total + (payInfo.tip || 0) }, shop))
+      .catch(e => console.warn('Kiosk done display failed:', e));
+    setDoneOrder(finalOrder);
+    setPayOpen(false);
+  };
+
+  const resetKiosk = () => {
+    setOrder({ ...emptyOrder(), source: 'kiosk' });
+    setDoneOrder(null);
+    setActiveCat('all');
+  };
+
+  if (doneOrder) {
+    return (
+      <div style={kioskStyles.doneScreen}>
+        <div style={kioskStyles.doneCard}>
+          <div style={kioskStyles.doneCheck}>✓</div>
+          <div style={kioskStyles.doneTitle}>Order received</div>
+          <div style={kioskStyles.doneNumber}>#{doneOrder.number}</div>
+          <div style={kioskStyles.doneText}>Your drink ticket was sent to the counter.</div>
+          {doneOrder.receiptPhone && <div style={kioskStyles.doneText}>Receipt phone: {doneOrder.receiptPhone}</div>}
+          <Button size="lg" onClick={resetKiosk} style={{ marginTop: 24, minWidth: 220 }}>New Order</Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={kioskStyles.screen}>
+      <aside style={kioskStyles.catBar}>
+        <button onClick={() => setActiveCat('all')}
+          style={{ ...kioskStyles.catButton, ...(activeCat === 'all' ? kioskStyles.catActive : {}) }}>
+          <span style={kioskStyles.catIcon}>🍱</span>
+          <span>All</span>
+        </button>
+        {categories.filter(c => c.id !== 'topping').map(c => (
+          <button key={c.id} onClick={() => setActiveCat(c.id)}
+            style={{ ...kioskStyles.catButton, ...(activeCat === c.id ? kioskStyles.catActive : {}) }}>
+            <span style={kioskStyles.catIcon}>{c.icon}</span>
+            <span>{c.name}</span>
+          </button>
+        ))}
+      </aside>
+
+      <main style={kioskStyles.menuArea}>
+        <div style={kioskStyles.kioskHead}>
+          <div>
+            <div style={kioskStyles.kioskTitle}>Order Now</div>
+            <div style={kioskStyles.kioskSub}>Choose items, customize, add tip, then pay now.</div>
+          </div>
+          <div style={kioskStyles.kioskBrand}>F</div>
+        </div>
+        <div style={kioskStyles.productGrid}>
+          {visibleMenu.map(p => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => selectProduct(p)}
+              style={kioskStyles.productTile}
+            >
+              <div style={{
+                ...kioskStyles.productImage,
+                background: p.image ? `url(${p.image}) center/cover` : p.gradient,
+              }}>
+                {!p.image && <span>{p.emoji}</span>}
+              </div>
+              <div style={kioskStyles.productInfo}>
+                <div style={kioskStyles.productName}>{p.name}</div>
+                <div style={kioskStyles.productBottom}>
+                  <span style={kioskStyles.productPrice}>{formatUSD(p.price)}</span>
+                  <span style={kioskStyles.productAdd}>+ Add</span>
+                </div>
+              </div>
+              {p.popular && <span style={kioskStyles.hotBadge}>HOT</span>}
+              {order.items.some(i => i.productId === p.id) && <span style={kioskStyles.inCartBadge}>Added</span>}
+            </button>
+          ))}
+        </div>
+      </main>
+
+      <aside style={kioskStyles.cart}>
+        <div style={kioskStyles.cartTitle}>Your Order #{order.number}</div>
+        <div style={kioskStyles.cartList}>
+          {order.items.length === 0 ? (
+            <div style={kioskStyles.emptyCart}>Tap a menu item to start.</div>
+          ) : order.items.map(line => (
+            <div key={line.id} style={kioskStyles.cartItem}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={kioskStyles.cartName}>{line.name}</div>
+                {line.category !== 'snack' && line.category !== 'topping' && (
+                  <div style={kioskStyles.cartMods}>
+                    {line.size === 'L' ? 'Large' : 'Regular'} · {line.sugar}% sugar · {line.ice}% ice
+                  </div>
+                )}
+                {line.toppings?.length > 0 && (
+                  <div style={kioskStyles.cartMods}>+ {line.toppings.map(t => t.name).join(', ')}</div>
+                )}
+              </div>
+              <div style={kioskStyles.qty}>
+                <button onClick={() => updateLine(line.id, { qty: line.qty - 1 })}>−</button>
+                <span>{line.qty}</span>
+                <button onClick={() => updateLine(line.id, { qty: line.qty + 1 })}>+</button>
+              </div>
+              <div style={kioskStyles.lineTotal}>{formatUSD(calcLineTotal(line))}</div>
+            </div>
+          ))}
+        </div>
+        <div style={kioskStyles.totals}>
+          <div style={kioskStyles.subRow}><span>Subtotal</span><span>{formatUSD(totals.sub)}</span></div>
+          <div style={kioskStyles.subRow}><span>Tax</span><span>{formatUSD(totals.tax)}</span></div>
+          <div style={kioskStyles.totalRow}><span>Total</span><span>{formatUSD(totals.total)}</span></div>
+          <Button
+            size="lg"
+            disabled={order.items.length === 0}
+            onClick={() => setPayOpen(true)}
+            style={{ width: '100%', opacity: order.items.length === 0 ? 0.45 : 1, marginTop: 14 }}
+          >
+            Pay Now
+          </Button>
+        </div>
+      </aside>
+
+      {customizing && (
+        <CustomizeModal
+          product={customizing}
+          menu={menu}
+          onAdd={(line) => { addLine(line); setCustomizing(null); }}
+          onClose={() => setCustomizing(null)}
+        />
+      )}
+
+      {payOpen && (
+        <KioskPaymentModal
+          order={order}
+          onClose={() => setPayOpen(false)}
+          onComplete={completeKioskOrder}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // ORDER RAIL (left sidebar)
 // ============================================================================
 function OrderRail({ orders, activeId, setActiveId, addOrder }) {
@@ -401,7 +633,10 @@ function OrderRail({ orders, activeId, setActiveId, addOrder }) {
 function ProductCard({ product, inCart, onClick }) {
   const isSoldOut = !product.available;
   return (
-    <button onClick={onClick} disabled={isSoldOut} style={{
+    <button
+      onClick={onClick}
+      disabled={isSoldOut}
+      style={{
       ...s.product,
       opacity: isSoldOut ? 0.4 : 1,
       cursor: isSoldOut ? 'not-allowed' : 'pointer',
@@ -777,6 +1012,171 @@ function PaymentModal({ order, onClose, onComplete }) {
   );
 }
 
+function KioskPaymentModal({ order, onClose, onComplete }) {
+  const { shop } = useShop();
+  const totals = calcOrderTotals(order);
+  const tipPercents = shop.tipPercents || [15, 18, 20, 25];
+  const [tip, setTip] = useState(0);
+  const [customTip, setCustomTip] = useState('');
+  const [started, setStarted] = useState(false);
+  const [status, setStatus] = useState(PAX_STATUS.IDLE);
+  const [result, setResult] = useState(null);
+  const [receiptPhone, setReceiptPhone] = useState('');
+
+  const tipAmount = customTip !== '' ? (parseFloat(customTip) || 0) : tip;
+  const totalWithTip = totals.total + tipAmount;
+
+  useEffect(() => {
+    const unsub = paxService.onUpdate(txn => {
+      if (!txn) return;
+      setStatus(txn.status);
+      if (['approved', 'declined', 'cancelled', 'timeout', 'error'].includes(txn.status.id)) {
+        setResult(txn);
+      }
+    });
+    return () => { unsub(); };
+  }, []);
+
+  const startPayment = async () => {
+    setStarted(true);
+    setResult(null);
+    setStatus(PAX_STATUS.SENDING);
+    const oldPax = { ...paxService.config };
+    try {
+      await orderHubService.ready;
+      const kioskPax = orderHubService.config.kioskPax || {};
+      if (kioskPax.enabled !== false) {
+        await paxService.updateConfig({
+          ...oldPax,
+          connectionMode: kioskPax.connectionMode || 'tcp',
+          terminalSerial: kioskPax.terminalSerial || '',
+          ip: kioskPax.ip || '',
+          port: Number(kioskPax.port || 10009),
+          timeout: Number(kioskPax.timeout || 60000),
+          tipRequest: kioskPax.tipRequest !== false,
+          usePosLinkSdk: kioskPax.usePosLinkSdk !== false,
+        });
+      }
+      await paxService.sale(totalWithTip, `K${order.number}`);
+    } catch (e) {
+      setResult({ status: PAX_STATUS.ERROR, error: e.message });
+      setStatus(PAX_STATUS.ERROR);
+    } finally {
+      await paxService.updateConfig(oldPax);
+    }
+  };
+
+  const approved = result?.status?.id === 'approved';
+
+  return (
+    <Modal onClose={approved ? () => {} : onClose} maxWidth={620}>
+      <div style={{ padding: 26 }}>
+        {!approved && <ModalClose onClose={onClose} />}
+        <div style={{ fontSize: 24, fontWeight: 900, color: C.text }}>Pay Now</div>
+        <div style={{ fontSize: 13, color: C.textMute, marginTop: 4, fontWeight: 800 }}>
+          Order #{order.number}
+        </div>
+        <div style={s.payTotalBox}>
+          <span style={{ fontWeight: 800 }}>Order total</span>
+          <span style={{ fontSize: 30, color: C.primary, fontWeight: 900 }}>{formatUSD(totals.total)}</span>
+        </div>
+
+        {!started && (
+          <>
+            <SectionLabel>Add tip</SectionLabel>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+              {tipPercents.map(p => {
+                const amount = Math.round(totals.total * (p / 100) * 100) / 100;
+                const active = customTip === '' && tip === amount;
+                return (
+                  <button key={p} onClick={() => { setCustomTip(''); setTip(amount); }}
+                    style={{ ...kioskStyles.tipButton, ...(active ? kioskStyles.tipActive : {}) }}>
+                    <strong>{p}%</strong>
+                    <span>{formatUSD(amount)}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <Field label="Custom tip amount">
+              <Input
+                value={customTip}
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                onChange={e => { setCustomTip(e.target.value); setTip(0); }}
+                style={{ fontSize: 22, textAlign: 'right' }}
+              />
+            </Field>
+            <div style={kioskStyles.paySummary}>
+              <span>Total with tip</span>
+              <strong>{formatUSD(totalWithTip)}</strong>
+            </div>
+            <Button size="lg" onClick={startPayment} style={{ width: '100%', marginTop: 12 }}>
+              Send to Terminal
+            </Button>
+          </>
+        )}
+
+        {started && !approved && (
+          <>
+            <PaxStatusCard status={status} />
+            {result && result.status?.id !== 'approved' && (
+              <div style={s.declineBox}>
+                <AlertCircle size={20} />
+                <div>
+                  <div style={{ fontWeight: 900 }}>{result.status?.label || 'Payment failed'}</div>
+                  <div style={{ fontSize: 12 }}>{result.error || result.declineReason || 'Please try again.'}</div>
+                </div>
+              </div>
+            )}
+            {result && result.status?.id !== 'approved' && (
+              <div style={{ display: 'flex', gap: 10 }}>
+                <Button variant="ghost" onClick={() => { setStarted(false); setResult(null); }} style={{ flex: 1 }}>Back</Button>
+                <Button onClick={startPayment} style={{ flex: 1 }}>Try Again</Button>
+              </div>
+            )}
+          </>
+        )}
+
+        {approved && (
+          <>
+            <div style={kioskStyles.approvedBox}>
+              <div style={{ fontSize: 34, fontWeight: 900 }}>✓</div>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 900 }}>Payment approved</div>
+                <div style={{ fontSize: 12, fontWeight: 800, color: C.textMute }}>
+                  {result.cardType || 'Card'} •••• {result.cardLast4 || '----'} · {formatUSD(totalWithTip)}
+                </div>
+              </div>
+            </div>
+            <Field label="Phone for receipt (optional)">
+              <Input
+                value={receiptPhone}
+                inputMode="tel"
+                placeholder="Customer phone number"
+                onChange={e => setReceiptPhone(e.target.value)}
+              />
+            </Field>
+            <Button onClick={() => onComplete({
+              method: 'card',
+              tip: tipAmount,
+              receiptPhone,
+              cardLast4: result.cardLast4,
+              cardType: result.cardType,
+              authCode: result.authCode,
+              paxRefNum: result.refNum,
+              paxResponseCode: result.responseCode,
+              paxRaw: result.raw,
+            })} style={{ width: '100%' }}>
+              Show Order Number
+            </Button>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function PayCard({ icon: Icon, label, highlight, onClick }) {
   return (
     <button onClick={onClick} style={{
@@ -860,7 +1260,12 @@ function CashFlow({ order, onBack, onDone }) {
 
       <Button
         disabled={!sufficient}
-        onClick={() => onDone({ method: 'cash', cashReceived: recvNum, changeGiven: change })}
+        onClick={async () => {
+          if (change > 0) {
+            await hardwareService.openCashDrawer().catch(e => console.warn('Cash drawer failed:', e));
+          }
+          onDone({ method: 'cash', cashReceived: recvNum, changeGiven: change });
+        }}
         style={{ width: '100%', opacity: sufficient ? 1 : 0.4 }}
       >
         Complete Sale
@@ -1330,6 +1735,106 @@ function buildReceiptEscpos({ order, totals, grandTotal, isCard }) {
   return new Uint8Array(out);
 }
 
+export async function printKitchenTicket(order) {
+  try {
+    await hardwareService.ready;
+    const bytes = buildKitchenTicketEscpos(order);
+    if (hardwareService.config.cashDrawerMode === 'usb_escpos') {
+      await hardwareService.printUsbEscpos(bytes);
+      return;
+    }
+  } catch (e) {
+    console.warn('Native kitchen ticket unavailable, falling back to browser print:', e);
+  }
+  printKitchenTicket80mm(order);
+}
+
+function buildKitchenTicketEscpos(order) {
+  const enc = new TextEncoder();
+  const out = [];
+  const push = (...bytes) => out.push(...bytes);
+  const text = (s = '') => push(...enc.encode(String(s).replace(/[^\x09\x0A\x0D\x20-\x7E]/g, '')));
+  const line = (s = '') => text(s + '\n');
+  const width = 42;
+  const rule = () => line('-'.repeat(width));
+  push(0x1B, 0x40);
+  push(0x1B, 0x45, 0x01);
+  line(`ORDER #${order.number}  ${String(order.type || '').toUpperCase()}`);
+  push(0x1B, 0x45, 0x00);
+  line(new Date(order.completedAt || Date.now()).toLocaleString());
+  if (order.source) line(`Source: ${order.source}`);
+  if (order.staffName) line(`Staff: ${order.staffName}`);
+  rule();
+  (order.items || []).forEach(item => {
+    push(0x1B, 0x45, 0x01);
+    line(`${item.qty} x ${item.name}`);
+    push(0x1B, 0x45, 0x00);
+    if (item.category !== 'snack' && item.category !== 'topping') {
+      line(`  ${item.size === 'L' ? 'Large' : 'Regular'}, ${item.sugar ?? 100}% sugar, ${item.ice ?? 100}% ice`);
+    }
+    if (item.toppings?.length) line(`  + ${item.toppings.map(t => t.name).join(', ')}`);
+  });
+  if (order.note) {
+    rule();
+    line(`NOTE: ${order.note}`);
+  }
+  rule();
+  line('\n\n');
+  push(0x1D, 0x56, 0x42, 0x00);
+  return new Uint8Array(out);
+}
+
+function printKitchenTicket80mm(order) {
+  const esc = (str) => String(str ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const rows = (order.items || []).map(item => `
+    <div class="item">${item.qty} x ${esc(item.name)}</div>
+    ${item.category !== 'snack' && item.category !== 'topping'
+      ? `<div class="sub">${item.size === 'L' ? 'Large' : 'Regular'}, ${item.sugar ?? 100}% sugar, ${item.ice ?? 100}% ice</div>`
+      : ''}
+    ${item.toppings?.length ? `<div class="sub">+ ${esc(item.toppings.map(t => t.name).join(', '))}</div>` : ''}
+  `).join('');
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Kitchen Ticket</title>
+<style>
+@page { size: 80mm auto; margin: 0; }
+body { width:80mm; padding:4mm 3mm; font-family:'Courier New',monospace; color:#000; font-size:13px; }
+.head { font-size:20px; font-weight:900; text-align:center; }
+.meta { font-size:11px; text-align:center; margin:3px 0 7px; }
+.dash { border-top:1px dashed #000; margin:7px 0; }
+.item { font-size:16px; font-weight:900; margin-top:5px; }
+.sub { font-size:11px; padding-left:12px; }
+.note { font-size:14px; font-weight:900; }
+</style></head><body>
+<div class="head">ORDER #${esc(order.number)}</div>
+<div class="meta">${esc((order.type || '').toUpperCase())} ${order.source ? `• ${esc(order.source)}` : ''}</div>
+<div class="meta">${new Date(order.completedAt || Date.now()).toLocaleString()}</div>
+<div class="dash"></div>
+${rows}
+${order.note ? `<div class="dash"></div><div class="note">NOTE: ${esc(order.note)}</div>` : ''}
+<div style="height:12mm"></div>
+</body></html>`;
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  document.body.appendChild(iframe);
+  const doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
+  setTimeout(() => {
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } catch (e) {
+      console.error('Kitchen print error', e);
+    }
+    setTimeout(() => document.body.removeChild(iframe), 2000);
+  }, 400);
+}
+
 // ----- Cash receipt (image 1 style) -----
 function CashReceipt({ order, totals, grandTotal }) {
   return (
@@ -1494,6 +1999,154 @@ function Row({ label, value }) {
 // ============================================================================
 // STYLES
 // ============================================================================
+const kioskStyles = {
+  screen: {
+    display: 'grid',
+    gridTemplateColumns: '132px minmax(0, 1fr) minmax(340px, 28vw)',
+    gap: 14,
+    height: '100%',
+    padding: 16,
+    background: C.bg,
+    color: C.text,
+  },
+  catBar: {
+    background: C.panel,
+    border: `1px solid ${C.border}`,
+    borderRadius: 12,
+    padding: 10,
+    display: 'grid',
+    gap: 10,
+    alignContent: 'start',
+    overflowY: 'auto',
+  },
+  catButton: {
+    minHeight: 86,
+    border: `1px solid ${C.border}`,
+    borderRadius: 10,
+    background: C.card,
+    color: C.text,
+    display: 'grid',
+    placeItems: 'center',
+    gap: 4,
+    fontWeight: 900,
+    fontSize: 13,
+    cursor: 'pointer',
+  },
+  catActive: {
+    background: C.primary,
+    color: C.bg,
+    borderColor: C.primary,
+    boxShadow: `inset 0 -3px 0 ${C.primaryD}`,
+  },
+  catIcon: { fontSize: 24, lineHeight: 1 },
+  menuArea: {
+    minWidth: 0,
+    background: C.panel,
+    border: `1px solid ${C.border}`,
+    borderRadius: 12,
+    padding: 14,
+    overflowY: 'auto',
+  },
+  kioskHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 },
+  kioskTitle: { fontSize: 26, fontWeight: 900, color: C.text },
+  kioskSub: { fontSize: 13, fontWeight: 800, color: C.textMute, marginTop: 3 },
+  kioskBrand: {
+    width: 50, height: 50, borderRadius: 14,
+    background: C.primaryG, color: '#fff',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 30, fontWeight: 900, fontFamily: 'Arial Black, sans-serif',
+  },
+  productGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 12 },
+  productTile: {
+    position: 'relative',
+    zIndex: 2,
+    border: `1px solid ${C.border}`,
+    borderRadius: 12,
+    background: C.card,
+    color: C.text,
+    textAlign: 'left',
+    padding: 0,
+    overflow: 'hidden',
+    cursor: 'pointer',
+    boxShadow: `0 5px 16px ${C.shadow}`,
+  },
+  productImage: {
+    width: 'calc(100% - 18px)',
+    aspectRatio: '1 / 1',
+    margin: '9px auto 0',
+    borderRadius: 10,
+    display: 'grid',
+    placeItems: 'center',
+    fontSize: 56,
+  },
+  productInfo: { padding: '12px 13px 13px' },
+  productName: { minHeight: 38, fontSize: 15, lineHeight: 1.25, fontWeight: 900, color: C.text, marginBottom: 9 },
+  productBottom: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  productPrice: { fontSize: 15, fontWeight: 900, color: C.text },
+  productAdd: { background: C.primary, color: C.bg, padding: '9px 15px', borderRadius: 10, fontWeight: 900, fontSize: 13, boxShadow: `0 2px 0 ${C.primaryD}` },
+  hotBadge: { position: 'absolute', top: 7, left: 7, background: '#FB7185', color: '#fff', borderRadius: 999, padding: '4px 9px', fontSize: 10, fontWeight: 900 },
+  inCartBadge: { position: 'absolute', top: 7, right: 7, background: C.cyan, color: C.bg, borderRadius: 999, padding: '4px 9px', fontSize: 10, fontWeight: 900 },
+  cart: {
+    minWidth: 0,
+    background: C.panel,
+    border: `1px solid ${C.border}`,
+    borderRadius: 12,
+    padding: 16,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  cartTitle: { fontSize: 18, fontWeight: 900, color: C.text, marginBottom: 12 },
+  cartList: { flex: 1, overflowY: 'auto', display: 'grid', gap: 10, alignContent: 'start', minHeight: 0 },
+  emptyCart: { color: C.textMute, fontWeight: 800, textAlign: 'center', marginTop: 60, fontSize: 14 },
+  cartItem: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 96px 74px', gap: 8, alignItems: 'center', background: C.card, borderRadius: 10, padding: 10 },
+  cartName: { fontSize: 14, fontWeight: 900, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  cartMods: { fontSize: 11, color: C.textMute, fontWeight: 800, marginTop: 3 },
+  qty: { display: 'grid', gridTemplateColumns: '28px 1fr 28px', alignItems: 'center', gap: 5, fontWeight: 900, textAlign: 'center' },
+  lineTotal: { fontSize: 13, fontWeight: 900, color: C.primary, textAlign: 'right' },
+  totals: { borderTop: `1px solid ${C.border}`, paddingTop: 14, marginTop: 14 },
+  subRow: { display: 'flex', justifyContent: 'space-between', color: C.textMute, fontSize: 13, fontWeight: 800, marginBottom: 5 },
+  totalRow: { display: 'flex', justifyContent: 'space-between', fontSize: 22, fontWeight: 900, color: C.text, marginTop: 8 },
+  tipButton: {
+    padding: 13,
+    borderRadius: 10,
+    border: `1px solid ${C.border}`,
+    background: C.card,
+    color: C.text,
+    cursor: 'pointer',
+    display: 'grid',
+    gap: 3,
+    fontWeight: 900,
+  },
+  tipActive: { background: C.primary, color: C.bg, borderColor: C.primary },
+  paySummary: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    background: C.card,
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 16,
+    fontWeight: 900,
+    marginTop: 10,
+  },
+  approvedBox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 14,
+    background: C.primaryA,
+    color: C.primary,
+    borderRadius: 14,
+    padding: 16,
+    margin: '16px 0',
+  },
+  doneScreen: { height: '100%', display: 'grid', placeItems: 'center', background: C.bg, color: C.text, padding: 20 },
+  doneCard: { width: 'min(540px, 100%)', background: C.panel, border: `1px solid ${C.border}`, borderRadius: 18, padding: 34, textAlign: 'center' },
+  doneCheck: { width: 78, height: 78, borderRadius: 999, background: C.primary, color: C.bg, display: 'grid', placeItems: 'center', margin: '0 auto 14px', fontSize: 42, fontWeight: 900 },
+  doneTitle: { fontSize: 28, fontWeight: 900, color: C.text },
+  doneNumber: { fontSize: 56, fontWeight: 900, color: C.primary, marginTop: 6 },
+  doneText: { fontSize: 14, fontWeight: 800, color: C.textMute, marginTop: 8 },
+};
+
 const s = {
   workspace: { display: 'flex', flex: 1, overflow: 'hidden' },
 

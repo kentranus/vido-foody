@@ -6,10 +6,12 @@ import {
 } from 'lucide-react';
 import { C } from '../theme';
 import { SHOP, formatUSD, formatDateTime } from '../config';
-import { DateRanges, loadOrdersInRange, markOrderRefunded, markOrderVoided } from '../services/orderStorage';
+import { DateRanges, loadAllOrders, loadOrdersInRange, markOrderRefunded, markOrderVoided, saveOrder } from '../services/orderStorage';
 import { paxService } from '../services/paxBridge';
 import { hardwareService } from '../services/hardwareBridge';
 import { customerDisplayService } from '../services/customerDisplayBridge';
+import { orderHubService } from '../services/orderHubService';
+import { printKitchenTicket } from './OrderView';
 import { Button, Field, Input, Modal, ModalClose } from '../components/Shared';
 
 export function OperationsView({ staff }) {
@@ -20,9 +22,11 @@ export function OperationsView({ staff }) {
   const [drawerNote, setDrawerNote] = useState('');
   const [deviceState, setDeviceState] = useState({ payment: false, displays: [], drawerMode: hardwareService.config.drawerMode });
   const [selectedAdjustment, setSelectedAdjustment] = useState(null);
+  const [hubState, setHubState] = useState({ enabled: false, online: false, imported: 0, message: '' });
 
   const refresh = async () => {
     setLoading(true);
+    const hubSync = await syncHubOrders();
     const [todayOrders, displays] = await Promise.all([
       loadOrdersInRange(range.start, range.end),
       customerDisplayService.listDisplays().catch(() => []),
@@ -33,6 +37,7 @@ export function OperationsView({ staff }) {
       displays,
       drawerMode: hardwareService.config.drawerMode,
     });
+    setHubState(hubSync);
     setLoading(false);
   };
 
@@ -52,6 +57,44 @@ export function OperationsView({ staff }) {
     }
     setSelectedAdjustment(null);
     await refresh();
+  };
+
+  const syncHubOrders = async () => {
+    await orderHubService.ready;
+    if (!orderHubService.config.enabled) {
+      return { enabled: false, online: false, imported: 0, message: 'Order Hub is off' };
+    }
+    try {
+      const res = await orderHubService.fetchOrders({ status: 'paid' });
+      const localOrders = await loadAllOrders();
+      const localIds = new Set(localOrders.map(o => o.hubId || o.id));
+      let imported = 0;
+      for (const order of res.orders || []) {
+        if (!localIds.has(order.hubId || order.id)) {
+          const stored = {
+            ...order,
+            id: order.id || order.hubId,
+            status: 'complete',
+            source: order.source || 'kiosk',
+            completedAt: order.completedAt || new Date().toISOString(),
+          };
+          await saveOrder(stored);
+          imported += 1;
+          if (orderHubService.config.autoPrintKitchenTickets) {
+            await printKitchenTicket(stored).catch(e => console.warn('Hub ticket print failed:', e));
+          }
+        }
+        if (orderHubService.config.autoAcceptKioskOrders) {
+          await orderHubService.updateOrderStatus(order.hubId || order.id, 'accepted', {
+            acceptedAt: new Date().toISOString(),
+            acceptedBy: staff?.name || 'POS',
+          }).catch(e => console.warn('Hub accept failed:', e));
+        }
+      }
+      return { enabled: true, online: true, imported, message: `${imported} new kiosk/online order(s)` };
+    } catch (e) {
+      return { enabled: true, online: false, imported: 0, message: e.message || 'Order Hub offline' };
+    }
   };
 
   return (
@@ -76,6 +119,15 @@ export function OperationsView({ staff }) {
       <div style={s.layout}>
         <section style={s.mainCol}>
           <Panel title="Live Counter Queue" icon={Activity}>
+            {hubState.enabled && (
+              <div style={{
+                ...s.hubNotice,
+                color: hubState.online ? C.green : C.red,
+                background: hubState.online ? 'rgba(74,222,128,0.12)' : C.redA,
+              }}>
+                POS Hub: {hubState.online ? 'Connected' : 'Offline'} · {hubState.message}
+              </div>
+            )}
             <div style={s.queue}>
               {activeQueue.length === 0 ? (
                 <EmptyLine text="No completed tickets today yet." />
@@ -313,6 +365,7 @@ const s = {
   sideCol: { display: 'grid', gap: 14, alignContent: 'start' },
   panel: { background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 },
   panelTitle: { fontSize: 13, fontWeight: 900, color: C.textMute, textTransform: 'uppercase', letterSpacing: 0.45, display: 'flex', alignItems: 'center', gap: 7, marginBottom: 14 },
+  hubNotice: { borderRadius: 8, padding: 10, fontSize: 12, fontWeight: 900, marginBottom: 10 },
   queue: { display: 'grid', gap: 8 },
   queueRow: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, display: 'flex', alignItems: 'center', gap: 12 },
   ticketNo: { width: 72, fontSize: 18, fontWeight: 900, color: C.primary },

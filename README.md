@@ -43,6 +43,7 @@ Yellow-orange Foody branding · Dark mode default · Web + Android APK from one 
 - 🌑 Dark mode default + ☀️ Light mode toggle
 - 💾 Persistent storage (orders, menu, settings)
 - 📊 Order history with search
+- 🧾 POS Hub for kiosk/online orders, shared order numbers, and auto kitchen ticket print
 - 🌐 **Web preview** for debugging (open DevTools F12)
 - ℹ️ About page with version + build info
 
@@ -88,6 +89,23 @@ Tab **Actions** → workflow runs automatically, 3 jobs in parallel:
 3. Enter IP, port `10009`
 4. **Test Connection** → should say Connected
 
+### 7. Kiosk / Online Order Hub
+Use this when kiosks or the online ordering website run on separate devices.
+
+1. On the POS/hub computer, run:
+   ```bash
+   cd pos-hub
+   npm start
+   ```
+2. POS app → **Settings → Kiosk / Online**
+3. Enable POS Hub and set URL to the hub IP, for example:
+   `http://192.168.68.55:8787`
+4. Use the same Store ID on POS and all kiosks.
+5. Each kiosk sets its own **Settings → Payment Settings** for its own PAX terminal.
+
+Flow:
+Kiosk → kiosk PAX terminal approves payment → POS Hub assigns the shared order number → POS Operations receives it → POS prints the kitchen/drink ticket.
+
 ## Default Credentials
 
 | Role     | PIN  |
@@ -122,6 +140,7 @@ All settings are saved on-device. Different tablets = different shops.
 vido-pos-final/
 ├── .github/workflows/build.yml      # Builds APK + deploys web
 ├── README.md
+├── pos-hub/                         # Local/cloud order hub for kiosk + online orders
 └── tablet-app/
     ├── package.json
     ├── vite.config.js
@@ -142,7 +161,8 @@ vido-pos-final/
         │   ├── menuStorage.js
         │   ├── orderStorage.js
         │   ├── staffStorage.js
-        │   └── paxBridge.js         # TCP + web simulation
+        │   ├── paxBridge.js         # TCP + web simulation
+        │   └── orderHubService.js   # Kiosk/online order sync
         └── views/
             ├── OrderView.jsx        # Selling (main)
             ├── HistoryView.jsx
