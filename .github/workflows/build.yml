@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-apk:
-    name: Build Android APK
+    name: Build Android POS APK
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
