@@ -63,6 +63,15 @@ jobs:
         working-directory: tablet-app
         run: npx cap sync android
 
+      - name: Generate app launcher icon + splash (Vido Foody icon)
+        working-directory: tablet-app
+        run: |
+          npx --yes @capacitor/assets generate --android \
+            --assetPath resources \
+            --iconBackgroundColor '#FFFFFF' --iconBackgroundColorDark '#0F1419' \
+            --splashBackgroundColor '#FFCC00' --splashBackgroundColorDark '#0F1419' \
+            || echo "asset generation skipped/failed (non-blocking)"
+
       - name: Install TcpSocket plugin
         working-directory: tablet-app
         run: |
