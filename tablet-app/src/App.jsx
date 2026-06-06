@@ -14,17 +14,20 @@ import { initOrderCounter } from './services/orderStorage';
 import { startHubPolling } from './services/hubIngest';
 import { orderHubService } from './services/orderHubService';
 import { embeddedHub, LOCAL_HUB_URL } from './services/embeddedHub';
+import { loadMode, saveMode, MODE_POS, MODE_KIOSK } from './services/modeStorage';
 import { DEFAULT_MENU, DEFAULT_CATEGORIES } from './data/defaultMenu';
 import { APP_VERSION, BUILD_NUMBER } from './version';
-import { PinLockScreen } from './components/Shared';
+import { PinLockScreen, BrandMark, Avatar } from './components/Shared';
+import { logActivity } from './services/activityStorage';
 import { OrderView, KioskOrderView } from './views/OrderView';
 import { HistoryView } from './views/HistoryView';
 import { ReportsView } from './views/ReportsView';
 import { OperationsView } from './views/OperationsView';
 import { SettingsView } from './views/SettingsView';
 
-const APP_MODE = import.meta.env.VITE_APP_MODE || 'pos';
-const IS_KIOSK_APP = APP_MODE === 'kiosk';
+// The device mode (POS vs Kiosk) is no longer fixed at build time — it is a
+// per-device setting loaded from storage at startup (see services/modeStorage).
+// One APK can therefore be flipped between a full POS and a customer Kiosk.
 const KIOSK_STAFF = {
   id: 'kiosk',
   name: 'Kiosk',
@@ -39,42 +42,53 @@ export const useShop = () => useContext(ShopContext);
 
 export default function App() {
   const [theme, setTheme] = useState(getInitialTheme());
-  const [view, setView] = useState(IS_KIOSK_APP ? 'kiosk' : 'sell');
-  const [staff, setStaff] = useState(IS_KIOSK_APP ? KIOSK_STAFF : null);
+  const [mode, setMode] = useState(null);          // 'pos' | 'kiosk' — null until loaded from storage
+  const [view, setView] = useState('sell');
+  const [staff, setStaff] = useState(null);
   const [shop, setShop] = useState(SHOP);
   const [menu, setMenu] = useState(DEFAULT_MENU);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
   const [loading, setLoading] = useState(true);
   const [settingsTab, setSettingsTab] = useState('pax');
 
+  const isKiosk = mode === MODE_KIOSK;
+
   useEffect(() => { applyTheme(theme); }, [theme]);
 
   useEffect(() => {
-    Promise.all([loadMenu(), loadCategories(), loadShop(), initOrderCounter()]).then(([m, c, s]) => {
-      setMenu(m); setCategories(c); setShop(s); setLoading(false);
-    });
+    Promise.all([loadMenu(), loadCategories(), loadShop(), initOrderCounter(), loadMode()])
+      .then(([m, c, s, _counter, savedMode]) => {
+        setMenu(m); setCategories(c); setShop(s);
+        setMode(savedMode);
+        if (savedMode === MODE_KIOSK) { setStaff(KIOSK_STAFF); setView('kiosk'); }
+        setLoading(false);
+      });
   }, []);
 
-  // Background order sync between kiosk(s) and POS.
-  //  - POS app: host an in-app hub (so the tablet itself is the switchboard —
-  //    no separate computer needed), then continuously pull kiosk orders + print.
-  //  - Kiosk app: keep retrying any order that couldn't reach the POS.
+  // Background order sync between kiosk(s) and POS. Re-runs whenever the device
+  // mode changes (e.g. a manager flips this tablet from POS to Kiosk), so the
+  // right sync strategy is always active.
+  //  - POS: host an in-app hub (the tablet itself is the switchboard — no
+  //    separate computer needed), then continuously pull kiosk orders + print.
+  //  - Kiosk: keep retrying any order that couldn't reach the POS.
   useEffect(() => {
-    if (IS_KIOSK_APP) {
-      const stop = orderHubService.startOutboxAutoFlush(7000);
-      return stop;
+    if (loading || !mode) return;
+    if (isKiosk) {
+      return orderHubService.startOutboxAutoFlush(7000);
     }
     let stopPolling = () => {};
+    let stopped = false;
     (async () => {
       const hub = await embeddedHub.start();
+      if (stopped) return;
       if (hub.running) {
         // The POS hosts its own hub → it talks to itself on localhost.
         await orderHubService.updateConfig({ enabled: true, hubUrl: LOCAL_HUB_URL });
       }
       stopPolling = startHubPolling({ intervalMs: 6000, staffName: 'POS' });
     })();
-    return () => { stopPolling(); embeddedHub.stop(); };
-  }, []);
+    return () => { stopped = true; stopPolling(); embeddedHub.stop(); };
+  }, [loading, mode, isKiosk]);
 
   const updateShop = async (updates) => {
     const newShop = await saveShop({ ...shop, ...updates });
@@ -82,8 +96,30 @@ export default function App() {
     return newShop;
   };
 
+  // Flip this device between POS and Kiosk mode (persisted per-device).
+  //  - POS → Kiosk: lock straight into the customer self-order screen.
+  //  - Kiosk → POS: drop back to the manager PIN sign-in for safety.
+  const changeMode = async (nextMode) => {
+    const saved = await saveMode(nextMode);
+    logActivity('mode_change', `Switched device to ${saved.toUpperCase()} mode`, { staff });
+    setMode(saved);
+    if (saved === MODE_KIOSK) {
+      setStaff(KIOSK_STAFF);
+      setView('kiosk');
+    } else {
+      clearCurrentStaff();
+      setStaff(null);
+      setView('sell');
+    }
+    return saved;
+  };
+
   const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
-  const handleLogout = () => { clearCurrentStaff(); setStaff(null); };
+  const handleLogout = () => {
+    logActivity('logout', 'Signed out', { staff });
+    clearCurrentStaff();
+    setStaff(null);
+  };
   const openView = (nextView, nextSettingsTab) => {
     if (nextSettingsTab) setSettingsTab(nextSettingsTab);
     setView(nextView);
@@ -93,7 +129,11 @@ export default function App() {
     setMenu(m); setCategories(c);
   };
 
-  if (!staff && !IS_KIOSK_APP) {
+  if (loading) {
+    return <div style={loadingStyle}>Loading...</div>;
+  }
+
+  if (!staff && !isKiosk) {
     return (
       <PinLockScreen
         title="Vido Foody"
@@ -103,11 +143,7 @@ export default function App() {
     );
   }
 
-  if (loading) {
-    return <div style={loadingStyle}>Loading...</div>;
-  }
-
-  if (IS_KIOSK_APP) {
+  if (isKiosk) {
     return (
       <ShopContext.Provider value={{ shop, updateShop }}>
         <div style={appStyle}>
@@ -119,7 +155,10 @@ export default function App() {
             ::-webkit-scrollbar-track { background: var(--panel); }
             ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
           `}</style>
-          <KioskOrderView menu={menu} categories={categories} staff={staff || KIOSK_STAFF} />
+          <KioskOrderView
+            menu={menu} categories={categories} staff={staff || KIOSK_STAFF}
+            onExitKiosk={() => changeMode(MODE_POS)}
+          />
         </div>
       </ShopContext.Provider>
     );
@@ -154,6 +193,7 @@ export default function App() {
               menu={menu} categories={categories}
               refreshMenu={refreshMenu} staff={staff}
               initialTab={settingsTab}
+              mode={mode} changeMode={changeMode}
             />
           )}
         </div>
@@ -193,6 +233,7 @@ function TopBar({ view, openView, theme, toggleTheme, staff, onLogout }) {
     { id: 'hardware', label: 'Cash Drawer', desc: 'Drawer/printer hardware setup', icon: Archive, view: 'settings', tab: 'hardware' },
     { id: 'display', label: 'Customer Display', desc: 'Owner/customer screen setup', icon: Monitor, view: 'settings', tab: 'display' },
     { id: 'hub', label: 'Kiosk / Online Orders', desc: 'Connect kiosks and website orders to POS', icon: Wifi, view: 'settings', tab: 'hub' },
+    { id: 'device', label: 'Device Mode', desc: 'Run this tablet as POS or Kiosk', icon: Monitor, view: 'settings', tab: 'device' },
     { id: 'shop', label: 'Shop Info', desc: 'Receipt header, tax, branch info', icon: Store, view: 'settings', tab: 'shop' },
     { id: 'settings', label: 'System Settings', desc: 'Version and diagnostics', icon: SettingsIcon, view: 'settings', tab: 'about' },
     { id: 'support', label: 'Daily Ops', desc: 'Use reports and order history for closeout', icon: LifeBuoy, view: 'reports' },
@@ -207,7 +248,7 @@ function TopBar({ view, openView, theme, toggleTheme, staff, onLogout }) {
   return (
     <header style={tbStyles.header}>
       <div style={tbStyles.brand}>
-        <div style={tbStyles.logo}>F</div>
+        <BrandMark size={46} radius={12} style={{ marginRight: 12 }} />
         <div>
           <div style={tbStyles.brandName}>{shop.name}</div>
           <div style={tbStyles.brandSub}>{shop.branch}</div>
@@ -259,19 +300,29 @@ function TopBar({ view, openView, theme, toggleTheme, staff, onLogout }) {
 
         <div style={{ position: 'relative' }}>
           <button onClick={() => setUserMenuOpen(!userMenuOpen)} style={tbStyles.userBtn}>
-            👤 {staff?.name || 'User'}
+            <Avatar staff={staff} size={30} />
+            <span style={tbStyles.userBtnText}>
+              <span style={tbStyles.userBtnName}>{staff?.name || 'User'}</span>
+              <span style={{
+                ...tbStyles.userBtnRole,
+                color: staff?.role === 'manager' ? C.primary : C.textMute,
+              }}>{staff?.role || ''}</span>
+            </span>
           </button>
           {userMenuOpen && (
             <>
               <div onClick={() => setUserMenuOpen(false)} style={tbStyles.menuOverlay} />
               <div style={tbStyles.userMenu}>
                 <div style={tbStyles.userMenuInfo}>
-                  <div style={{ fontWeight: 800, fontSize: 13 }}>{staff?.name}</div>
-                  <div style={{ fontSize: 11, color: C.textMute, fontWeight: 700, marginTop: 2, textTransform: 'capitalize' }}>
-                    {staff?.role}
-                  </div>
-                  <div style={{ fontSize: 10, color: C.textDim, fontWeight: 700, marginTop: 4 }}>
-                    v{APP_VERSION} · #{BUILD_NUMBER === '__BUILD_NUMBER__' ? 'dev' : BUILD_NUMBER}
+                  <Avatar staff={staff} size={48} />
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 14 }}>{staff?.name}</div>
+                    <div style={{ fontSize: 11, color: staff?.role === 'manager' ? C.primary : C.textMute, fontWeight: 800, marginTop: 2, textTransform: 'capitalize' }}>
+                      {staff?.role}
+                    </div>
+                    <div style={{ fontSize: 10, color: C.textDim, fontWeight: 700, marginTop: 4 }}>
+                      v{APP_VERSION} · #{BUILD_NUMBER === '__BUILD_NUMBER__' ? 'dev' : BUILD_NUMBER}
+                    </div>
                   </div>
                 </div>
                 <button onClick={() => { setUserMenuOpen(false); onLogout(); }} style={tbStyles.userMenuItem}>
@@ -310,16 +361,6 @@ const tbStyles = {
     flexShrink: 0,
   },
   brand: { display: 'flex', alignItems: 'center' },
-  logo: {
-    width: 46, height: 46,
-    background: C.primaryG,
-    borderRadius: 12, textAlign: 'center', lineHeight: '46px',
-    fontSize: 28, fontWeight: 900, color: '#fff',
-    marginRight: 12,
-    boxShadow: C.primaryGShadow,
-    fontFamily: 'Arial Black, sans-serif',
-    letterSpacing: -1,
-  },
   brandName: { fontSize: 20, fontWeight: 900, color: C.text },
   brandSub: { fontSize: 11, color: C.textMute, fontWeight: 700 },
   menuWrap: { position: 'relative' },
@@ -346,10 +387,14 @@ const tbStyles = {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
   userBtn: {
-    background: C.card, color: C.text, border: 'none',
-    padding: '7px 14px', borderRadius: 999,
+    background: C.card, color: C.text, border: `1px solid ${C.border}`,
+    padding: '5px 12px 5px 5px', borderRadius: 999,
     cursor: 'pointer', fontWeight: 800, fontSize: 13,
+    display: 'flex', alignItems: 'center', gap: 9,
   },
+  userBtnText: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.1 },
+  userBtnName: { fontSize: 13, fontWeight: 900, color: C.text },
+  userBtnRole: { fontSize: 10, fontWeight: 800, textTransform: 'capitalize', marginTop: 1 },
   menuOverlay: { position: 'fixed', inset: 0, zIndex: 99 },
   mainMenu: {
     position: 'absolute', top: '100%', left: '50%',
@@ -384,7 +429,7 @@ const tbStyles = {
     boxShadow: `0 10px 30px ${C.shadow}`,
     zIndex: 100, overflow: 'hidden',
   },
-  userMenuInfo: { padding: '12px 14px', borderBottom: `1px solid ${C.border}`, background: C.card },
+  userMenuInfo: { padding: '14px', borderBottom: `1px solid ${C.border}`, background: C.card, display: 'flex', alignItems: 'center', gap: 12 },
   userMenuItem: {
     width: '100%', background: 'transparent', color: C.text,
     border: 'none', padding: '10px 14px',

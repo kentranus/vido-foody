@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Plus, Minus, Search, Tag, FileText, DollarSign, CreditCard, Smartphone,
-  ArrowLeft, X, Check, AlertCircle, RefreshCw, Archive, Settings, Wifi,
+  ArrowLeft, X, Check, AlertCircle, RefreshCw, Archive, Settings, Wifi, Store,
 } from 'lucide-react';
 import { C } from '../theme';
 import { SHOP, ORDER_TYPES, formatUSD, formatTime } from '../config';
@@ -9,8 +9,9 @@ import { paxService, PAX_STATUS } from '../services/paxBridge';
 import { hardwareService } from '../services/hardwareBridge';
 import { customerDisplayService } from '../services/customerDisplayBridge';
 import { saveOrder, nextOrderNumber } from '../services/orderStorage';
+import { logActivity } from '../services/activityStorage';
 import { orderHubService } from '../services/orderHubService';
-import { Modal, ModalClose, PinLockScreen, Button, Input, Field } from '../components/Shared';
+import { Modal, ModalClose, PinLockScreen, Button, Input, Field, BrandMark } from '../components/Shared';
 import { useShop } from '../App';
 
 // ============================================================================
@@ -134,6 +135,11 @@ export function OrderView({ menu, categories, staff }) {
 
   const applyDiscount = (amount, type) => {
     updateOrder({ discount: amount, discountType: type });
+    if (amount > 0) {
+      const label = type === 'percent' ? `${amount}%` : formatUSD(amount);
+      logActivity('discount', `Discount ${label} on order #${activeOrder?.number || ''}`,
+        { staff, amount: type === 'percent' ? undefined : amount });
+    }
     setDiscountModalOpen(false);
   };
 
@@ -309,6 +315,8 @@ export function OrderView({ menu, categories, staff }) {
               })),
             };
             saveOrder(finalOrder).catch(e => console.warn('Save order failed:', e));
+            logActivity('sale', `Order #${finalOrder.number} · ${payInfo.method} · ${formatUSD(totals.total + (payInfo.tip || 0))}`,
+              { staff, amount: totals.total + (payInfo.tip || 0) });
             printKitchenTicket(finalOrder).catch(e => console.warn('Kitchen ticket failed:', e));
             customerDisplayService
               .update(customerDisplayService.donePayload({ total: totals.total + (payInfo.tip || 0) }, shop))
@@ -366,8 +374,26 @@ export function OrderView({ menu, categories, staff }) {
 // ============================================================================
 // KIOSK ORDER VIEW — same menu/options as POS, customer-facing checkout
 // ============================================================================
-export function KioskOrderView({ menu, categories, staff }) {
+
+/** True when the screen is taller than it is wide (portrait kiosk). */
+function useIsPortrait() {
+  const get = () => (typeof window !== 'undefined' ? window.innerHeight >= window.innerWidth : false);
+  const [portrait, setPortrait] = useState(get);
+  useEffect(() => {
+    const onResize = () => setPortrait(get());
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  }, []);
+  return portrait;
+}
+
+export function KioskOrderView({ menu, categories, staff, onExitKiosk }) {
   const { shop } = useShop();
+  const portrait = useIsPortrait();
   const [order, setOrder] = useState(() => ({ ...emptyOrder(), source: 'kiosk' }));
   const [activeCat, setActiveCat] = useState('all');
   const [customizing, setCustomizing] = useState(null);
@@ -473,6 +499,8 @@ export function KioskOrderView({ menu, categories, staff }) {
 
     finalOrder = { ...finalOrder, hubDelivered, hubPending };
     await saveOrder(finalOrder);
+    logActivity('sale', `Kiosk order #${finalOrder.number || ''} · ${formatUSD(freshTotals.total + (payInfo.tip || 0))}`,
+      { staff: staff || { id: 'kiosk', name: 'Kiosk', role: 'kiosk' }, amount: freshTotals.total + (payInfo.tip || 0) });
 
     // Print the kitchen ticket at the kiosk ONLY when it is running standalone
     // (no POS Hub). When the hub is on, the POS prints the ticket — printing
@@ -515,7 +543,7 @@ export function KioskOrderView({ menu, categories, staff }) {
   }
 
   return (
-    <div style={kioskStyles.screen}>
+    <div style={{ ...kioskStyles.screen, ...(portrait ? kioskStyles.screenPortrait : {}) }}>
       {/* Hidden admin hotspot — invisible to customers. 5 taps → Manager PIN. */}
       <div
         onClick={handleSecretTap}
@@ -523,7 +551,7 @@ export function KioskOrderView({ menu, categories, staff }) {
         aria-hidden="true"
       />
 
-      <aside style={kioskStyles.catBar}>
+      <aside style={{ ...kioskStyles.catBar, ...(portrait ? kioskStyles.catBarPortrait : {}) }}>
         <button onClick={() => setActiveCat('all')}
           style={{ ...kioskStyles.catButton, ...(activeCat === 'all' ? kioskStyles.catActive : {}) }}>
           <span style={kioskStyles.catIcon}>🍱</span>
@@ -545,7 +573,7 @@ export function KioskOrderView({ menu, categories, staff }) {
             <div style={kioskStyles.kioskSub}>Choose items, customize, add tip, then pay now.</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={kioskStyles.kioskBrand}>F</div>
+            <BrandMark size={52} radius={14} />
           </div>
         </div>
         <div style={kioskStyles.productGrid}>
@@ -576,7 +604,7 @@ export function KioskOrderView({ menu, categories, staff }) {
         </div>
       </main>
 
-      <aside style={kioskStyles.cart}>
+      <aside style={{ ...kioskStyles.cart, ...(portrait ? kioskStyles.cartPortrait : {}) }}>
         <div style={kioskStyles.cartTitle}>Your Order #{order.number}</div>
         <div style={kioskStyles.cartList}>
           {order.items.length === 0 ? (
@@ -647,19 +675,23 @@ export function KioskOrderView({ menu, categories, staff }) {
       )}
 
       {settingsOpen && (
-        <KioskAdminSettings onClose={() => setSettingsOpen(false)} />
+        <KioskAdminSettings
+          onClose={() => setSettingsOpen(false)}
+          onExitKiosk={onExitKiosk}
+        />
       )}
     </div>
   );
 }
 
-function KioskAdminSettings({ onClose }) {
+function KioskAdminSettings({ onClose, onExitKiosk }) {
   const normalizeKioskConfig = (next) => ({
     ...next,
     stationId: !next.stationId || next.stationId === 'pos-1' ? 'kiosk-1' : next.stationId,
   });
   const [cfg, setCfg] = useState(() => normalizeKioskConfig({ ...orderHubService.config }));
   const [saved, setSaved] = useState(false);
+  const [exitConfirm, setExitConfirm] = useState(false);
   const [hubResult, setHubResult] = useState(null);
   const [terminalResult, setTerminalResult] = useState(null);
   const [busy, setBusy] = useState('');
@@ -906,6 +938,31 @@ function KioskAdminSettings({ onClose }) {
         <Button onClick={save} disabled={busy === 'save'} style={{ width: '100%', marginTop: 4 }}>
           {saved ? <><Check size={16} /> Saved</> : 'Save'}
         </Button>
+
+        {/* DEVICE MODE — turn this tablet back into a full POS terminal. */}
+        {onExitKiosk && (
+          <div style={{ ...kioskStyles.settingsPanel, marginTop: 18, borderColor: C.border }}>
+            <div style={kioskStyles.settingsTitle}>Device mode</div>
+            <div style={{ fontSize: 12, color: C.textMute, fontWeight: 700, marginBottom: 12 }}>
+              This tablet is running in <b>Kiosk</b> mode. Switch it back to a full
+              POS terminal (cashier sign-in, reports, settings).
+            </div>
+            {!exitConfirm ? (
+              <Button variant="ghost" onClick={() => setExitConfirm(true)} style={{ width: '100%' }}>
+                <Store size={16} /> Switch to POS mode
+              </Button>
+            ) : (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Button variant="ghost" onClick={() => setExitConfirm(false)} style={{ flex: 1 }}>
+                  Cancel
+                </Button>
+                <Button onClick={() => onExitKiosk()} style={{ flex: 1 }}>
+                  <Store size={16} /> Confirm
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </Modal>
   );
@@ -2336,6 +2393,22 @@ const kioskStyles = {
     padding: 16,
     background: C.bg,
     color: C.text,
+  },
+  // Portrait kiosk (screen taller than wide): stack categories on top,
+  // menu in the middle, cart pinned to the bottom.
+  screenPortrait: {
+    gridTemplateColumns: '1fr',
+    gridTemplateRows: 'auto minmax(0, 1fr) auto',
+  },
+  catBarPortrait: {
+    gridAutoFlow: 'column',
+    gridAutoColumns: '96px',
+    gridTemplateColumns: 'none',
+    overflowX: 'auto',
+    overflowY: 'hidden',
+  },
+  cartPortrait: {
+    maxHeight: '42vh',
   },
   catBar: {
     background: C.panel,

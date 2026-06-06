@@ -1,11 +1,10 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
-const appMode = process.env.VITE_APP_MODE || process.env.APP_MODE || 'pos';
-const isKiosk = appMode === 'kiosk';
-
+// One unified app — POS vs Kiosk is now a per-device runtime setting
+// (see src/services/modeStorage.js), not a separate build/appId.
 const config: CapacitorConfig = {
-  appId: isKiosk ? 'com.vido.foody.kiosk' : 'com.vido.foody',
-  appName: isKiosk ? 'Vido Foody Kiosk' : 'Vido Foody',
+  appId: 'com.vido.foody',
+  appName: 'Vido Foody',
   webDir: 'dist',
   bundledWebRuntime: false,
   android: {

@@ -3,6 +3,11 @@
 **Modern restaurant POS for boba/coffee/fast food shops.**
 Yellow-orange Foody branding · Dark mode default · Web + Android APK from one codebase.
 
+> **One app, two modes.** POS and Kiosk are now the **same app** (`com.vido.foody`).
+> Every tablet installs the identical APK; each device is set to run as a **POS
+> terminal** or a customer **Kiosk** from **Settings → Device Mode** (saved
+> per-device). No separate kiosk build. See [Device Mode](#device-mode-pos--kiosk).
+
 ## Features
 
 ### Selling
@@ -105,6 +110,50 @@ Use this when kiosks or the online ordering website run on separate devices.
 
 Flow:
 Kiosk → kiosk PAX terminal approves payment → POS Hub assigns the shared order number → POS Operations receives it → POS prints the kitchen/drink ticket.
+
+## Device Mode (POS / Kiosk)
+
+POS and Kiosk are the **same app** — the mode is a per-device runtime setting,
+not a separate build. A brand-new install defaults to **POS**.
+
+**Make a device a Kiosk**
+1. Sign in as Manager → **Menu → Device Mode** (or Settings → Device Mode).
+2. Tap **Switch this device to Kiosk mode** → confirm.
+3. The screen locks into the full-screen customer self-order view (no sign-in).
+   The chosen mode is saved on the device and survives restarts.
+
+**Turn a Kiosk back into a POS** (intentionally hidden from customers)
+1. Tap the **top-left corner 5 times** within 3 seconds.
+2. Enter the **Manager PIN** → the kiosk settings open.
+3. Under **Device mode**, tap **Switch to POS mode** → confirm.
+   The device drops back to the POS Manager sign-in.
+
+> Technically: the mode lives in storage key `vido_device_mode`
+> (`src/services/modeStorage.js`). `VITE_APP_MODE` in `.env.production` only sets
+> the *initial* default for a fresh install.
+
+## Staff identity & activity audit
+
+- **Sign-in identity.** After entering a PIN, the signed-in staff is shown in the
+  top bar as a compact pill — profile picture (or auto initials, manager gets the
+  brand gradient), name, and role.
+- **Profile pictures.** Settings → Staff → edit a member → **Profile picture**:
+  upload a photo or type an emoji. Blank = auto initials.
+- **Activity audit log.** Every staff action is recorded per-device so the owner
+  can review/control later, in **Reports**:
+  - **Staff Performance** — per-staff: orders, net sales, tips, # discounts, # voids/refunds, sign-ins.
+  - **Staff Activity Log** — chronological feed: sign-in/out, sales, discounts,
+    voids, refunds, device-mode changes — with who, what, and when.
+  - Filtered by the same date range as the rest of Reports. Stored in
+    `vido_activity` (`src/services/activityStorage.js`), capped at 5k entries.
+
+## Branding
+
+The Vido Foody icon (`tablet-app/src/assets/brand-icon.png`) is used for the PIN
+screen, top bar, kiosk header, and About page. The web favicon points at
+`public/brand-icon.png`. The Android launcher icon + splash are generated from
+`resources/logo.png` during CI (`@capacitor/assets`). The PIN screen uses a
+**Liquid Glass** treatment (frosted card, floating color blobs, glass keypad).
 
 ## Default Credentials
 

@@ -1,23 +1,29 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Calendar, Download, TrendingUp, DollarSign, ShoppingBag, CreditCard,
-  Award, Clock, BarChart3, PieChart, Trash2, RefreshCw, ChevronDown,
+  Award, Clock, BarChart3, PieChart, Trash2, RefreshCw, ChevronDown, Users,
 } from 'lucide-react';
 import { C } from '../theme';
 import { formatUSD, formatDateTime, SHOP } from '../config';
 import { loadOrdersInRange, clearAllOrders, DateRanges } from '../services/orderStorage';
-import { Button } from '../components/Shared';
+import { loadActivityInRange, clearActivity, ACTIVITY_TYPES } from '../services/activityStorage';
+import { Button, Avatar } from '../components/Shared';
 
 export function ReportsView() {
   const [range, setRange] = useState(DateRanges.today());
   const [orders, setOrders] = useState([]);
+  const [activity, setActivity] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showRangeMenu, setShowRangeMenu] = useState(false);
 
   const loadOrders = async () => {
     setLoading(true);
-    const data = await loadOrdersInRange(range.start, range.end);
+    const [data, acts] = await Promise.all([
+      loadOrdersInRange(range.start, range.end),
+      loadActivityInRange(range.start, range.end),
+    ]);
     setOrders(data);
+    setActivity(acts);
     setLoading(false);
   };
 
@@ -28,6 +34,7 @@ export function ReportsView() {
   const topItems = useMemo(() => calcTopItems(orders), [orders]);
   const payments = useMemo(() => calcPayments(orders), [orders]);
   const categories = useMemo(() => calcCategories(orders), [orders]);
+  const staffPerf = useMemo(() => calcStaffPerf(orders, activity), [orders, activity]);
 
   const exportCSV = () => {
     const headers = ['Order #', 'Date', 'Time', 'Type', 'Items', 'Subtotal', 'Discount', 'Tax', 'Tip', 'Total', 'Payment', 'Card', 'Staff'];
@@ -63,6 +70,13 @@ export function ReportsView() {
   const clearData = async () => {
     if (confirm('Delete ALL stored orders? This cannot be undone.')) {
       await clearAllOrders();
+      await loadOrders();
+    }
+  };
+
+  const clearActivityData = async () => {
+    if (confirm('Delete ALL staff activity history? This cannot be undone.')) {
+      await clearActivity();
       await loadOrders();
     }
   };
@@ -178,9 +192,132 @@ export function ReportsView() {
           </div>
         </>
       )}
+
+      {staffPerf.length > 0 && (
+        <div style={{ ...s.chartCard, marginTop: 14 }}>
+          <div style={s.chartTitle}><Users size={14} /> Staff Performance</div>
+          <StaffPerfTable rows={staffPerf} />
+        </div>
+      )}
+
+      {activity.length > 0 && (
+        <div style={{ ...s.chartCard, marginTop: 14 }}>
+          <div style={s.chartTitle}>
+            <Clock size={14} /> Staff Activity Log ({activity.length})
+            <button onClick={clearActivityData} style={s.dangerBtn}>
+              <Trash2 size={12} /> Clear
+            </button>
+          </div>
+          <ActivityFeed items={activity} />
+        </div>
+      )}
     </div>
   );
 }
+
+// ============================================================================
+// STAFF PERFORMANCE + ACTIVITY
+// ============================================================================
+function calcStaffPerf(orders, activity) {
+  const map = {};
+  const get = (id, name, role, avatar) => {
+    if (!map[id]) map[id] = { id, name, role, avatar, orders: 0, sales: 0, tips: 0, discounts: 0, voids: 0, refunds: 0, logins: 0 };
+    // keep the most descriptive name/avatar we've seen
+    if (name && name !== 'Unknown') map[id].name = name;
+    if (role) map[id].role = role;
+    if (avatar) map[id].avatar = avatar;
+    return map[id];
+  };
+  for (const o of orders) {
+    if (o.status === 'voided') continue;
+    const f = orderFinancials(o);
+    const r = get(o.staffId || 'unknown', o.staffName, o.role, o.staffAvatar);
+    r.orders += 1;
+    r.sales += f.net;
+    r.tips += f.tip;
+  }
+  for (const a of activity) {
+    const r = get(a.staffId || 'unknown', a.staffName, a.role, a.avatar);
+    if (a.type === 'discount') r.discounts += 1;
+    else if (a.type === 'void') r.voids += 1;
+    else if (a.type === 'refund') r.refunds += 1;
+    else if (a.type === 'login') r.logins += 1;
+  }
+  return Object.values(map).sort((a, b) => b.sales - a.sales);
+}
+
+function StaffPerfTable({ rows }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {rows.map(r => (
+        <div key={r.id} style={perf.row}>
+          <Avatar staff={r} size={40} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 900, color: C.text }}>{r.name}</div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: r.role === 'manager' ? C.primary : C.textMute, textTransform: 'capitalize' }}>
+              {r.role || 'staff'} · {r.logins} sign-in{r.logins === 1 ? '' : 's'}
+            </div>
+          </div>
+          <PerfStat label="Orders" value={r.orders} />
+          <PerfStat label="Net Sales" value={formatUSD(r.sales)} />
+          <PerfStat label="Tips" value={formatUSD(r.tips)} />
+          <PerfStat label="Discounts" value={r.discounts} tone={r.discounts ? C.yellow : undefined} />
+          <PerfStat label="Void/Refund" value={r.voids + r.refunds} tone={(r.voids + r.refunds) ? C.red : undefined} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PerfStat({ label, value, tone }) {
+  return (
+    <div style={{ textAlign: 'right', minWidth: 64 }}>
+      <div style={{ fontSize: 14, fontWeight: 900, color: tone || C.text }}>{value}</div>
+      <div style={{ fontSize: 9, fontWeight: 800, color: C.textMute, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
+    </div>
+  );
+}
+
+const TONE_COLORS = { green: C.green, red: C.red, yellow: C.yellow, blue: C.blue, primary: C.primary, mute: C.textMute };
+
+function ActivityFeed({ items }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 360, overflowY: 'auto' }}>
+      {items.map(a => {
+        const meta = ACTIVITY_TYPES[a.type] || { label: a.type, tone: 'mute' };
+        const color = TONE_COLORS[meta.tone] || C.textMute;
+        return (
+          <div key={a.id} style={perf.actRow}>
+            <Avatar staff={{ name: a.staffName, role: a.role, avatar: a.avatar }} size={32} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>
+                <span style={{ color }}>{meta.label}</span>
+                {a.detail ? <span style={{ color: C.textMute, fontWeight: 700 }}> — {a.detail}</span> : null}
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.textMute }}>
+                {a.staffName}{a.role ? ` · ${a.role}` : ''}
+              </div>
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: C.textDim, whiteSpace: 'nowrap' }}>
+              {formatDateTime(a.ts)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const perf = {
+  row: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    background: C.card, borderRadius: 12, padding: '10px 14px',
+  },
+  actRow: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    padding: '9px 4px', borderBottom: `1px solid ${C.border}`,
+  },
+};
 
 // ============================================================================
 // CALCULATIONS

@@ -7,6 +7,7 @@ import {
 import { C } from '../theme';
 import { SHOP, formatUSD, formatDateTime } from '../config';
 import { DateRanges, loadAllOrders, loadOrdersInRange, markOrderRefunded, markOrderVoided, saveOrder } from '../services/orderStorage';
+import { logActivity } from '../services/activityStorage';
 import { paxService } from '../services/paxBridge';
 import { hardwareService } from '../services/hardwareBridge';
 import { customerDisplayService } from '../services/customerDisplayBridge';
@@ -51,10 +52,14 @@ export function OperationsView({ staff }) {
 
   const applyAdjustment = async ({ type, amount, reason }) => {
     if (!selectedAdjustment) return;
+    const num = selectedAdjustment.number || '';
     if (type === 'void') {
       await markOrderVoided(selectedAdjustment.id, reason);
+      logActivity('void', `Voided order #${num}${reason ? ' · ' + reason : ''}`, { staff });
     } else {
       await markOrderRefunded(selectedAdjustment.id, amount, reason);
+      logActivity('refund', `Refunded ${formatUSD(amount)} on order #${num}${reason ? ' · ' + reason : ''}`,
+        { staff, amount: parseFloat(amount) || 0 });
     }
     setSelectedAdjustment(null);
     await refresh();

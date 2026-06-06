@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Plus, Edit3, Trash2, Save, Check, X, RefreshCw, WifiOff, Monitor,
+  Plus, Edit3, Trash2, Save, Check, X, RefreshCw, WifiOff, Monitor, Store,
 } from 'lucide-react';
 import { C } from '../theme';
 import { SHOP, formatUSD } from '../config';
@@ -13,17 +13,17 @@ import { saveMenu, saveCategories, resetMenuToDefaults } from '../services/menuS
 import { loadStaff, addStaff, updateStaff, deleteStaff } from '../services/staffStorage';
 import { APP_VERSION, BUILD_DATE, BUILD_NUMBER, COMMIT_SHORT } from '../version';
 import { DEFAULT_MENU } from '../data/defaultMenu';
-import { Modal, ModalClose, Button, Input, Field, PinLockScreen } from '../components/Shared';
+import { Modal, ModalClose, Button, Input, Field, PinLockScreen, BrandMark, Avatar } from '../components/Shared';
 import { useShop } from '../App';
 
-export function SettingsView({ menu, categories, refreshMenu, staff, initialTab = 'pax' }) {
+export function SettingsView({ menu, categories, refreshMenu, staff, initialTab = 'pax', mode, changeMode }) {
   const [tab, setTab] = useState(initialTab);
   const [needsManagerPin, setNeedsManagerPin] = useState(false);
   const [unlockedTab, setUnlockedTab] = useState(null);
 
   useEffect(() => { setTab(initialTab); }, [initialTab]);
 
-  const requiresManager = (tabId) => ['staff', 'pax', 'hardware', 'display', 'hub'].includes(tabId);
+  const requiresManager = (tabId) => ['staff', 'pax', 'hardware', 'display', 'hub', 'device'].includes(tabId);
 
   const switchTab = (tabId) => {
     if (requiresManager(tabId) && staff.role !== 'manager' && unlockedTab !== tabId) {
@@ -46,6 +46,7 @@ export function SettingsView({ menu, categories, refreshMenu, staff, initialTab 
           { id: 'menu',  label: 'Menu Editor' },
           { id: 'staff', label: 'Staff', requiresMgr: true },
           { id: 'shop',  label: 'Shop Info' },
+          { id: 'device', label: 'Device Mode', requiresMgr: true },
           { id: 'about', label: 'About' },
         ].map(t => (
           <button key={t.id}
@@ -73,6 +74,7 @@ export function SettingsView({ menu, categories, refreshMenu, staff, initialTab 
         {tab === 'menu' && <MenuEditor menu={menu} categories={categories} refreshMenu={refreshMenu} />}
         {tab === 'staff' && <StaffManager />}
         {tab === 'shop' && <ShopInfo />}
+        {tab === 'device' && <DeviceModeSettings mode={mode} changeMode={changeMode} />}
         {tab === 'about' && <AboutTab />}
       </div>
 
@@ -1482,17 +1484,7 @@ function StaffManager() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {staff.map(m => (
           <div key={m.id} style={s.itemCard}>
-            <div style={{
-              width: 44, height: 44, borderRadius: 12,
-              background: m.role === 'manager'
-                ? `linear-gradient(135deg, ${C.primary}, ${C.primaryD})`
-                : C.card,
-              color: m.role === 'manager' ? C.bg : C.text,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 18, fontWeight: 900,
-            }}>
-              {m.name?.[0] || '?'}
-            </div>
+            <Avatar staff={m} size={44} />
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 800, fontSize: 14, color: C.text }}>
                 {m.name}
@@ -1521,9 +1513,18 @@ function StaffEditModal({ member, onSave, onClose }) {
     role: member.role || 'cashier',
     pin: member.pin || '',
     active: member.active !== false,
+    avatar: member.avatar || '',
   });
 
   const valid = form.name.trim() && /^\d{4}$/.test(form.pin);
+
+  const onPhoto = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setForm(f => ({ ...f, avatar: reader.result }));
+    reader.readAsDataURL(file);
+  };
 
   return (
     <Modal onClose={onClose} maxWidth={400}>
@@ -1532,6 +1533,31 @@ function StaffEditModal({ member, onSave, onClose }) {
         <div style={{ fontSize: 20, fontWeight: 900, color: C.text, marginBottom: 18 }}>
           {member.id ? 'Edit Staff' : 'New Staff'}
         </div>
+
+        <Field label="Profile picture" hint="Upload a photo, or type an emoji. Leave blank for auto initials.">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Avatar staff={{ ...form }} size={56} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+              <label style={{
+                background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
+                padding: '8px 12px', fontSize: 12, fontWeight: 800, color: C.text,
+                cursor: 'pointer', textAlign: 'center',
+              }}>
+                Upload photo
+                <input type="file" accept="image/*" onChange={onPhoto} style={{ display: 'none' }} />
+              </label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <Input value={/^(data:|https?:)/.test(form.avatar) ? '' : form.avatar}
+                  onChange={e => setForm({ ...form, avatar: e.target.value })}
+                  placeholder="😀 emoji" maxLength={3} style={{ flex: 1 }} />
+                {form.avatar && (
+                  <Button variant="ghost" size="sm" onClick={() => setForm({ ...form, avatar: '' })}>Clear</Button>
+                )}
+              </div>
+            </div>
+          </div>
+        </Field>
+
         <Field label="Name">
           <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} autoFocus />
         </Field>
@@ -1747,6 +1773,82 @@ function SectionTitle({ children }) {
 }
 
 // ============================================================================
+// DEVICE MODE — flip this tablet between POS terminal and customer Kiosk
+// ============================================================================
+function DeviceModeSettings({ mode, changeMode }) {
+  const [confirmKiosk, setConfirmKiosk] = useState(false);
+  const isKiosk = mode === 'kiosk';
+
+  const card = (active) => ({
+    flex: 1, padding: 18, borderRadius: 14, textAlign: 'left',
+    border: `2px solid ${active ? C.primary : C.border}`,
+    background: active ? C.primaryA : C.panel,
+    color: C.text,
+  });
+
+  return (
+    <div style={{ maxWidth: 560 }}>
+      <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 6 }}>Device Mode</div>
+      <div style={{ fontSize: 13, color: C.textMute, fontWeight: 700, marginBottom: 18, lineHeight: 1.5 }}>
+        Choose how this specific tablet runs. The same app can be a full
+        <b> POS</b> terminal or a customer-facing <b>Kiosk</b>. This setting is
+        saved on this device only.
+      </div>
+
+      <div style={{ display: 'flex', gap: 14, marginBottom: 20 }}>
+        <div style={card(!isKiosk)}>
+          <Store size={22} color={!isKiosk ? C.primary : C.textMute} />
+          <div style={{ fontSize: 16, fontWeight: 900, marginTop: 8 }}>POS terminal</div>
+          <div style={{ fontSize: 12, color: C.textMute, fontWeight: 700, marginTop: 4 }}>
+            Cashier sign-in, order entry, payments, reports, settings.
+          </div>
+          {!isKiosk && <div style={{ marginTop: 10, fontSize: 12, fontWeight: 900, color: C.primary }}>● Current mode</div>}
+        </div>
+        <div style={card(isKiosk)}>
+          <Monitor size={22} color={isKiosk ? C.primary : C.textMute} />
+          <div style={{ fontSize: 16, fontWeight: 900, marginTop: 8 }}>Kiosk</div>
+          <div style={{ fontSize: 12, color: C.textMute, fontWeight: 700, marginTop: 4 }}>
+            Full-screen customer self-order. No staff sign-in.
+          </div>
+          {isKiosk && <div style={{ marginTop: 10, fontSize: 12, fontWeight: 900, color: C.primary }}>● Current mode</div>}
+        </div>
+      </div>
+
+      {!isKiosk && !confirmKiosk && (
+        <Button onClick={() => setConfirmKiosk(true)} style={{ width: '100%' }}>
+          <Monitor size={16} /> Switch this device to Kiosk mode
+        </Button>
+      )}
+
+      {!isKiosk && confirmKiosk && (
+        <div style={{ background: C.panel, padding: 18, borderRadius: 12, border: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 6 }}>Switch to Kiosk mode?</div>
+          <div style={{ fontSize: 12, color: C.textMute, fontWeight: 700, marginBottom: 14, lineHeight: 1.5 }}>
+            The screen will lock into the customer self-order view. To get back to
+            POS, tap the <b>top-left corner 5 times</b>, enter the Manager PIN,
+            then choose <b>Switch to POS mode</b>.
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="ghost" onClick={() => setConfirmKiosk(false)} style={{ flex: 1 }}>
+              Cancel
+            </Button>
+            <Button onClick={() => changeMode('kiosk')} style={{ flex: 1 }}>
+              <Monitor size={16} /> Switch to Kiosk
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {isKiosk && (
+        <Button onClick={() => changeMode('pos')} variant="ghost" style={{ width: '100%' }}>
+          <Store size={16} /> Switch this device back to POS
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // ABOUT
 // ============================================================================
 function AboutTab() {
@@ -1781,9 +1883,12 @@ Online: ${navigator.onLine}`;
         boxShadow: C.primaryGShadow,
       }}>
         <div style={{
-          fontSize: 56, fontWeight: 900, marginBottom: 4,
-          fontFamily: 'Arial Black, sans-serif', letterSpacing: -2,
-        }}>F</div>
+          width: 84, height: 84, borderRadius: 22, margin: '0 auto 10px',
+          background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.18)',
+        }}>
+          <BrandMark size={64} />
+        </div>
         <div style={{ fontSize: 24, fontWeight: 900 }}>Vido Foody</div>
         <div
           onClick={() => { const n = tapCount + 1; setTapCount(n); if (n >= 7) setDebug(true); }}
